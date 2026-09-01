@@ -1,0 +1,34 @@
+# config.yaml のひな形。コピーして使う:
+#     Windows:      copy config.example.yaml config.yaml
+#     mac / Linux:  cp config.example.yaml config.yaml
+#
+# setup.bat を実行した場合は自動でコピー済み。
+#
+# 認証情報（メールアドレス・パスワード）はここには書かない。
+# サイトのログイン情報は .env、Google の鍵は service_account.json に置く。
+
+google_calendar:
+  # 予定を書き込むカレンダーの ID。
+  # 自分のメインカレンダーなら自分のメールアドレス、
+  # 専用カレンダーを作った場合は「設定と共有」に表示されるカレンダー ID。
+  # ※サービスアカウント方式では "primary" は使えない
+  calendar_id: "you@example.com"
+
+  # サービスアカウントの鍵（推奨・トークンが失効しない）
+  service_account_file: "service_account.json"
+
+  # 以下は OAuth 方式を使う場合のみ（service_account.json が無いときに使われる）
+  credentials_file: "credentials.json"
+  token_file: "token.json"
+
+  # 予定のタイトル先頭に付く目印。重複検出にも使うので途中で変えない
+  event_tag: "[就活自動登録]"
+  color_id: "11"          # 11 = Tomato（赤）
+  reminder_days: [3, 1]   # 何日前に通知するか
+
+settings:
+  days_ahead: 90              # 何日先までの締切を対象にするか
+  headless: true              # false にするとブラウザが表示される（デバッグ用）
+  debug_screenshots: false    # true で各ステップのスクショを保存
+  log_file: "shukatsu.log"
+  # user_agent: ""            # 必要なら上書き（既定は OS に合わせて自動選択）

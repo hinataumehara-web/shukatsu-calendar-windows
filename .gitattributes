@@ -1,0 +1,12 @@
+# 改行コードの扱い
+# Windows で clone しても Python / YAML は LF のまま扱う。
+# .bat と .ps1 は CRLF でないと cmd.exe が誤動作することがある。
+* text=auto eol=lf
+
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+
+*.png  binary
+*.ico  binary
+*.jpg  binary

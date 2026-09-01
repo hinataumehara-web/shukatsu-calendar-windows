@@ -1,0 +1,38 @@
+# 外資就活ドットコム
+# 注意: 2026-04 時点でこの定義では 0 件しか取得できていない。
+#       サイトが動的レンダリングに変わった可能性が高く、
+#       tools/inspect_site.py でページテキストを確認して調整が必要。
+name: "外資就活ドットコム"
+enabled: true
+
+credentials:
+  email_env: GAISHISHUKATSU_EMAIL
+  password_env: GAISHISHUKATSU_PASSWORD
+
+login:
+  url: "https://gaishishukatsu.com/login"
+  steps:
+    - {action: fill,  selector: 'input[type="email"]', value: "{email}"}
+    - {action: fill,  selector: 'input[type="password"]', value: "{password}"}
+    - {action: click, selector: 'button:has-text("ログインする")'}
+    - {action: wait,  ms: 2000}
+  success_check:
+    url_not_contains: "/login"
+
+listings:
+  - url: "https://gaishishukatsu.com/recruiting_info"
+    wait_ms: 4000
+    deadline:
+      # 「締切」「まで」などの語を含む行を締切行とみなし、周辺から日付を拾う
+      match: keyword
+      date_from: context
+      context_before: 1
+      context_after: 3
+    company:
+      lookback: 8
+      min_length: 4
+      skip_exact:
+        ["募集を探す", "企業を探す", "ES・体験記", "AI選考対策", "コラム", "エンジニア",
+         "スカウト", "ホーム", "並べ替え", "おすすめ順", "新着順", "締切順", "開催順",
+         "絞り込む", "対象で絞り込む", "締切開始日", "締切終了日", "開催開始日",
+         "開催終了日", "対象卒年で絞り込む", "New", "For Engineer", "就活コパイロット"]

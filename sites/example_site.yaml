@@ -1,0 +1,82 @@
+# ============================================================================
+# サイト定義のテンプレート（スキーマの全項目つき）
+#
+# 新しいサイトに対応するには、このファイルをコピーして sites/ に置き、
+# 値を書き換えるだけでよい。Python を書く必要はない。
+#
+#   cp sites/example_site.yaml sites/mynavi.yaml
+#
+# 調整のコツ:
+#   1. tools/inspect_site.py で一覧ページのテキストを行番号つきで書き出す
+#   2. 「締切」を示す行のパターンと、その周辺の何行前に企業名が出るかを見る
+#   3. メニューや絞り込みなど、毎回出てくる無関係な行を skip_exact に足す
+# ============================================================================
+
+name: "サンプル就活サイト"      # カレンダーの「出典」に出る表示名
+enabled: false                  # true にすると実行対象になる
+
+credentials:
+  # 認証情報そのものは絶対にここに書かない。環境変数名だけを書く。
+  # 値は .env に置く（.env は .gitignore 済み）
+  email_env: EXAMPLE_EMAIL
+  password_env: EXAMPLE_PASSWORD
+
+login:
+  url: "https://example.com/login"
+  # 上から順に実行される。ログイン不要のサイトなら login ごと省略可
+  steps:
+    # action の種類:
+    #   fill   … 一括入力（多くのサイトはこれで足りる）
+    #   type   … 1文字ずつ入力（delay_ms 指定可。JS フレームワークのフォーム向け）
+    #   click  … クリック
+    #   press  … キー送出（key: "Enter" / "Tab" など）
+    #   wait   … 待機（ms: ミリ秒）
+    #   goto   … 別 URL へ遷移
+    #   select … <select> の選択
+    # value 内の {email} / {password} は環境変数の値に置換される
+    - {action: fill,  selector: 'input[name="email"]', value: "{email}"}
+    - {action: fill,  selector: 'input[name="password"]', value: "{password}"}
+    - {action: click, selector: 'button[type="submit"]'}
+    - {action: wait,  ms: 2000}
+  success_check:
+    # ログイン後もこの文字列が URL に残っていたら失敗とみなす（省略可）
+    url_not_contains: "/login"
+
+listings:
+  # 一覧ページは複数書ける（インターン用・本選考用など）
+  - url: "https://example.com/jobs"
+    wait_ms: 3000                 # JS 描画の待ち時間
+    title_prefix: "【締切】"       # 予定タイトルの先頭に付く文字列（省略可）
+    drop_empty_lines: true        # ページテキストから空行を除く
+    dedupe: true                  # 同じ「企業名＋日付」を1件にまとめる
+
+    deadline:
+      # どの行を締切行とみなすか
+      #   exact   … value と完全一致する行（例: "締切" だけの行）
+      #   regex   … value の正規表現にマッチする行
+      #   keyword … 「締切」「まで」などの語を含む行
+      match: regex
+      value: '締切[:：]?\s*\d{1,2}月\d{1,2}日'
+
+      # 日付をどこから読むか
+      #   same_line … 締切行そのもの
+      #   next_line … 締切行の次の行
+      #   context   … 前後数行をまとめたテキスト
+      date_from: same_line
+      context_before: 1
+      context_after: 3
+
+    # 前後の文脈にこれらの語があればその件を無視する（受付終了など）
+    skip_if_context_contains: ["（終了）", "受付終了"]
+
+    company:
+      # 締切行から何行前まで遡って企業名・タイトルを探すか
+      lookback: 8
+      # これより短い行はノイズとみなす
+      min_length: 4
+      # 完全一致で除外する行（ヘッダ・絞り込みメニューなど）
+      skip_exact: ["ホーム", "検索", "絞り込む", "新着順"]
+      # 正規表現で除外する行
+      skip_patterns:
+        - '^\d{4}卒$'
+        - '^(オンライン|オフライン)$'

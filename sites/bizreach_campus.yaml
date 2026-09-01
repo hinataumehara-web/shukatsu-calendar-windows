@@ -1,0 +1,43 @@
+# ビズリーチ・キャンパス
+# 動作確認: 2026-04 時点。サイト構造が変わったらセレクタ/ノイズ行を調整すること。
+name: "ビズリーチ・キャンパス"
+enabled: true
+
+credentials:
+  email_env: BIZREACH_CAMPUS_EMAIL
+  password_env: BIZREACH_CAMPUS_PASSWORD
+
+login:
+  url: "https://br-campus.jp/auth/login"
+  steps:
+    # Knockout.js のフォームなので、fill ではなく1文字ずつ入力し
+    # Tab で blur させて change イベントを発火させる必要がある
+    - {action: click, selector: "#email"}
+    - {action: type,  selector: "#email", value: "{email}", delay_ms: 50}
+    - {action: press, selector: "#email", key: "Tab"}
+    - {action: type,  selector: "#password", value: "{password}", delay_ms: 50}
+    - {action: press, selector: "#password", key: "Enter"}
+    - {action: wait,  ms: 1500}
+  success_check:
+    url_not_contains: "/auth/login"
+
+listings:
+  - url: "https://br-campus.jp/internships"
+    wait_ms: 3000
+    title_prefix: "【インターン締切】"
+    # 同じ企業が複数の募集を出しているため、企業＋日付での重複排除はしない
+    dedupe: false
+    deadline:
+      # 「締切」だけの行がマーカーで、その次の行が日付
+      match: exact
+      value: "締切"
+      date_from: next_line
+    company:
+      lookback: 6
+      min_length: 4
+      skip_exact:
+        ["OB/OG訪問", "キャリア支援", "募集を探す", "記事", "企業", "スカウト",
+         "メッセージ", "選考管理", "本選考・その他", "合同イベント", "すべて", "申込済",
+         "絞り込む", "クリア", "インターン", "説明会", "選考会", "座談会",
+         "就活対策講座", "オフライン", "オンライン", "限定開催",
+         "参加後の特典", "OB/OG交流", "募集中のみ", "締切が近い順", "New", "フリーワード"]

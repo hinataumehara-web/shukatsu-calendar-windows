@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Windows で動くことがこのリポジトリの主目的なので windows を先頭に置く
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test dependencies
+        # スクレイピング用の重い依存（playwright など）はテストに不要
+        run: pip install pyyaml pytest
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Byte-compile all sources
+        run: python -m compileall -q engine main.py tools
+
+      - name: main.py --list-sites が動くこと
+        # Playwright を入れずに済む範囲の起動確認。
+        # Windows のコンソール（cp932）で落ちないかもここで分かる。
+        run: python main.py --list-sites --config config.example.yaml

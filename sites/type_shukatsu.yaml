@@ -1,0 +1,41 @@
+# type就活
+# 動作確認: 2026-04 時点
+name: "type就活"
+enabled: true
+
+credentials:
+  email_env: TYPE_SHUKATSU_EMAIL
+  password_env: TYPE_SHUKATSU_PASSWORD
+
+login:
+  url: "https://typeshukatsu.jp/login/"
+  steps:
+    - {action: fill,  selector: 'input[name="_USR_MAIL"]', value: "{email}"}
+    - {action: fill,  selector: 'input[name="_USR_PASS"]', value: "{password}"}
+    - {action: click, selector: 'input[type="button"].submit-btn'}
+    - {action: wait,  ms: 2000}
+  success_check:
+    url_not_contains: "/login/"
+
+listings:
+  - url: "https://typeshukatsu.jp/recruitment/"
+    wait_ms: 2500
+    deadline:
+      # 「2026年05月21日 23:59まで」形式の行を直接拾う
+      match: regex
+      value: '\d{4}年\d{1,2}月\d{1,2}日[^\n]*まで'
+      date_from: same_line
+      context_before: 5
+      context_after: 2
+    # 受付終了済みの募集は登録しない
+    skip_if_context_contains: ["（終了）"]
+    company:
+      lookback: 8
+      min_length: 4
+      skip_exact:
+        ["エントリー受付中", "NEW", "インターン", "本選考", "イベント・説明会を探す",
+         "インターン・本選考を探す", "企業情報を見る", "記事を読む", "ログイン",
+         "新規会員登録", "詳細を見る", "エントリーする", "前のページ", "次のページ"]
+      skip_patterns:
+        - '^\d{4}卒$'
+        - '^(オンライン|オフライン|NEW|インターン|本選考)$'
