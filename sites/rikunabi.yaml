@@ -1,0 +1,68 @@
+# ============================================================================
+# リクナビ
+#
+# 状態: ログイン方法は manual 方式で確認済み。一覧ページの URL とパターンは
+#       未確定（enabled: false）。下の手順で自分の環境に合わせて埋めること
+#
+# なぜ login.mode が manual なのか
+# --------------------------------
+# 現在のリクナビは JavaScript で組まれた画面（Next.js）で、ログインボタンは
+# リンクではなくボタン、CSS クラス名も styles_button__XwAS7 のように
+# ビルドのたびに変わるハッシュ付きになっている。YAML にセレクタを書いても
+# サイトが更新された瞬間に壊れる。1回だけ手でログインし、状態を保存して使う:
+#
+#     python main.py --login rikunabi
+#
+# 一覧ページの URL を見つける手順
+# --------------------------------
+#   1. python main.py --login rikunabi
+#      ブラウザが開いたらログインし、「エントリー状況」「気になるリスト」など
+#      締切が並んでいるページまで進んで、そのアドレスバーの URL をコピーしておく
+#   2. コピーした URL を、下の listings[0].url に貼る
+#   3. 中身を確認する（YAML を書き換えずに試すこともできる）:
+#        python tools/inspect_site.py rikunabi --url "<コピーした URL>" --grep 締切
+#   4. 出力の行の並びを見て deadline / company を調整し、
+#        python main.py --site rikunabi --dry-run
+#      が期待どおりになったら enabled: true にする
+# ============================================================================
+
+name: "リクナビ"
+enabled: false          # listings の URL を差し替えてから true にする
+
+credentials: {}
+
+login:
+  mode: manual
+  url: "https://job.rikunabi.com/"
+  success_check:
+    # ログアウト状態のページに出る文言。ログイン中は出ない想定。
+    # 実際の表示に合わせて直すこと（例: "新規会員登録"）
+    logged_out_text: "新規会員登録"
+
+listings:
+  # ★要差し替え★ 現在はトップページを指しているだけで、締切は取れない。
+  # 上の手順1でコピーした、自分のマイページの URL に置き換えること
+  - url: "https://job.rikunabi.com/"
+    wait_ms: 5000        # SPA なので描画待ちは長めに
+    title_prefix: "【リクナビ】"
+
+    deadline:
+      match: keyword
+      keywords: ["締切", "締め切り", "〆切", "エントリー期限", "応募期限", "応募締切"]
+      date_from: same_line
+      context_before: 3
+      context_after: 3
+
+    skip_if_context_contains: ["受付終了", "終了しました", "応募済"]
+
+    company:
+      lookback: 8
+      min_length: 4
+      skip_exact:
+        ["ログイン", "新規会員登録", "マイページ", "検索", "もっと見る", "すべて見る",
+         "フォロー", "企業名や業種で探す", "注目企業", "すべて", "新着",
+         "締め切りが近い", "インターン＆キャリア"]
+      skip_patterns:
+        - '^\d{4}卒$'
+        - '^\d{1,2}月$'
+        - '^(オンライン|対面|WEB|1day)$'

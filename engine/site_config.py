@@ -12,6 +12,10 @@ from typing import Any, Optional
 import yaml
 
 VALID_ACTIONS = {"goto", "click", "fill", "type", "press", "wait", "select"}
+# steps  : YAML に書いた手順で自動ログインする（従来方式）
+# manual : 最初の1回だけ人がブラウザでログインし、その状態を保存して使い回す
+#          （2段階認証や JavaScript 製ログイン画面のサイト向け）
+VALID_LOGIN_MODES = {"steps", "manual"}
 VALID_MATCH_MODES = {"exact", "regex", "keyword"}
 VALID_DATE_SOURCES = {"same_line", "next_line", "context"}
 
@@ -92,7 +96,10 @@ class SiteConfig:
     enabled: bool = True
     email_env: str = ""
     password_env: str = ""
+    login_mode: str = "steps"
     login_success_url_not_contains: str = ""
+    login_success_selector: str = ""
+    logged_out_marker: str = ""
 
     # --- 認証情報は環境変数からのみ読む（YAML には決して書かない） ---
     def credentials(self) -> dict[str, str]:
@@ -110,7 +117,13 @@ class SiteConfig:
         return creds
 
     def requires_login(self) -> bool:
+        if self.login_mode == "manual":
+            return True
         return bool(self.login_url and self.login_steps)
+
+    def uses_saved_session(self) -> bool:
+        """保存済みセッションを使う（自動ログインを行わない）方式か"""
+        return self.login_mode == "manual"
 
 
 def _validate_steps(name: str, steps: list) -> list[dict]:
@@ -141,6 +154,14 @@ def parse_site_config(raw: dict, slug: str = "") -> SiteConfig:
 
     login = raw.get("login") or {}
     creds = raw.get("credentials") or {}
+
+    login_mode = login.get("mode", "steps")
+    if login_mode not in VALID_LOGIN_MODES:
+        raise SiteConfigError(
+            f"[{name}] login.mode は {sorted(VALID_LOGIN_MODES)} のいずれか: {login_mode!r}"
+        )
+
+    success_check = login.get("success_check") or {}
 
     listings_raw = raw.get("listings")
     if not listings_raw:
@@ -176,9 +197,12 @@ def parse_site_config(raw: dict, slug: str = "") -> SiteConfig:
         enabled=bool(raw.get("enabled", True)),
         email_env=creds.get("email_env", ""),
         password_env=creds.get("password_env", ""),
+        login_mode=login_mode,
         login_url=login.get("url", ""),
         login_steps=_validate_steps(name, login.get("steps")),
-        login_success_url_not_contains=(login.get("success_check") or {}).get("url_not_contains", ""),
+        login_success_url_not_contains=success_check.get("url_not_contains", ""),
+        login_success_selector=success_check.get("selector", ""),
+        logged_out_marker=success_check.get("logged_out_text", ""),
         listings=listings,
     )
 

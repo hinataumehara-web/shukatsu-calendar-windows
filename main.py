@@ -23,6 +23,7 @@ if sys.version_info < (3, 10):
     )
 
 import argparse  # noqa: E402
+import asyncio  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 from datetime import date  # noqa: E402
@@ -34,7 +35,7 @@ sys.path.insert(0, BASE_DIR)
 
 # calendar_client は google 系ライブラリを読み込むので、ここでは import しない。
 # --list-sites / --dry-run は Google の認証情報が無くても動くようにしたい。
-from engine import runtime  # noqa: E402
+from engine import runtime, session  # noqa: E402
 from engine.site_config import SiteConfigError, load_site_configs  # noqa: E402
 
 logger = logging.getLogger("shukatsu")
@@ -105,10 +106,14 @@ async def run_site(site, settings: dict):
     from engine.scraper import GenericScraper
 
     entries = []
+    # login.mode: manual のサイトは、--login で保存したログイン状態を読み込む
+    storage_state = session.load_path(BASE_DIR, site.slug) if site.uses_saved_session() else None
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=settings.get("headless", True))
         context = await browser.new_context(
-            user_agent=settings.get("user_agent") or runtime.default_user_agent()
+            user_agent=settings.get("user_agent") or runtime.default_user_agent(),
+            storage_state=storage_state,
         )
         page = await context.new_page()
         scraper = GenericScraper(site, page, settings, base_dir=BASE_DIR)
@@ -129,6 +134,58 @@ async def run_site(site, settings: dict):
     return entries
 
 
+async def login_site(site, settings: dict):
+    """ブラウザを開いて人にログインしてもらい、その状態を保存する
+
+    マイナビの6桁確認コードやリクナビの JavaScript 製ログイン画面は
+    YAML の手順では越えられない。1回だけ手でログインし、Cookie を保存して
+    以後の巡回で使い回す。
+    """
+    from playwright.async_api import async_playwright
+
+    if not runtime.has_console():
+        logger.error("--login は対話が必要です。コンソールのある状態で実行してください。")
+        return 1
+
+    start_url = site.login_url or (site.listings[0].url if site.listings else "")
+    if not start_url:
+        logger.error(f"{site.name}: login.url も listings も無いため開く先が決まりません")
+        return 1
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context(
+            user_agent=settings.get("user_agent") or runtime.default_user_agent()
+        )
+        page = await context.new_page()
+        await page.goto(start_url, wait_until="domcontentloaded")
+
+        output("")
+        output(f"  ブラウザで「{site.name}」にログインしてください。")
+        output("  2段階認証のコード入力まで終わらせ、マイページが表示された状態にします。")
+        output("  終わったら、この画面で Enter を押してください。")
+        output("")
+        await asyncio.get_running_loop().run_in_executor(None, input, "  Enter で保存 > ")
+
+        state = await context.storage_state()
+        path = session.save(BASE_DIR, site.slug, state)
+
+        # 保存した状態で本当に見えるか、一覧ページで軽く確認する
+        if site.listings:
+            await page.goto(site.listings[0].url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)
+            marker = site.login_success_url_not_contains
+            if marker and marker in page.url:
+                output(f"  警告: 一覧ページが {page.url} に飛ばされました。")
+                output("  ログインが完了していない可能性があります。")
+        await browser.close()
+
+    output(f"  ログイン状態を保存しました: {path}")
+    output(f"  確認: python main.py --site {site.slug} --dry-run")
+    logger.info(f"{site.name}: セッションを保存しました")
+    return 0
+
+
 async def main_async(args):
     config = load_config(args.config)
     settings = config.get("settings", {})
@@ -139,12 +196,30 @@ async def main_async(args):
     if args.list_sites:
         for s in sites:
             state = "有効" if s.enabled else "無効"
-            output(f"  {s.slug:<24} {s.name:<24} [{state}] 一覧 {len(s.listings)} ページ")
+            auth = f"手動ログイン: {session.describe(BASE_DIR, s.slug)}" if s.uses_saved_session() else "自動ログイン"
+            output(f"  {s.slug:<20} {s.name:<22} [{state}] 一覧 {len(s.listings)} / {auth}")
         return 0
+
+    if args.login:
+        target = next((s for s in sites if s.slug == args.login), None)
+        if target is None:
+            logger.error(f"サイト定義が見つかりません: {args.login}")
+            return 1
+        return await login_site(target, settings)
 
     targets = [s for s in sites if (s.slug in args.site) or (not args.site and s.enabled)]
     if not targets:
         logger.error("実行対象のサイトがありません（--list-sites で確認してください）")
+        return 1
+
+    missing = [s for s in targets if s.uses_saved_session() and not session.exists(BASE_DIR, s.slug)]
+    for s in missing:
+        logger.error(
+            f"{s.name}: ログイン状態が保存されていません。先に実行してください: "
+            f"python main.py --login {s.slug}"
+        )
+    targets = [s for s in targets if s not in missing]
+    if not targets:
         return 1
 
     cal = None
@@ -184,6 +259,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="カレンダーに書き込まず、検出した締切を表示するだけ")
     parser.add_argument("--list-sites", action="store_true", help="サイト定義の一覧を表示")
+    parser.add_argument("--login", metavar="SLUG",
+                        help="ブラウザを開いて手動ログインし、その状態を保存する"
+                             "（login.mode: manual のサイト用）")
     args = parser.parse_args()
 
     load_dotenv()

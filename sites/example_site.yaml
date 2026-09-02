@@ -22,6 +22,13 @@ credentials:
   password_env: EXAMPLE_PASSWORD
 
 login:
+  # mode の選び方:
+  #   steps  … .env の認証情報で毎回自動ログインする（既定。多くのサイトはこれ）
+  #   manual … 1回だけ人が手でログインし、その状態を保存して使い回す。
+  #            2段階認証があるサイト、ログイン画面が JavaScript 製で
+  #            セレクタが安定しないサイト向け。steps と credentials は不要になる。
+  #              python main.py --login <slug>
+  mode: steps
   url: "https://example.com/login"
   # 上から順に実行される。ログイン不要のサイトなら login ごと省略可
   steps:
@@ -41,6 +48,10 @@ login:
   success_check:
     # ログイン後もこの文字列が URL に残っていたら失敗とみなす（省略可）
     url_not_contains: "/login"
+    # mode: manual のとき、セッションが生きているかの判定にも使う。
+    # 次の2つも同じ用途（いずれも省略可）
+    # selector: ".mypage-header"      # ログイン後にだけ存在する要素
+    # logged_out_text: "新規会員登録"  # ログアウト時にだけ出る文言
 
 listings:
   # 一覧ページは複数書ける（インターン用・本選考用など）

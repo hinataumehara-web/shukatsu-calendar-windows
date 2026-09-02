@@ -38,6 +38,10 @@ Windows では動かないか、動いても途中で落ちる箇所があった
 | `.gitattributes` で `.bat` を CRLF 固定 | clone の設定次第で LF になり、cmd.exe が誤動作する |
 | CI を Windows / macOS / Ubuntu × Python 3.10・3.12 に | Windows で壊れたことに気づけるようにする |
 
+あわせて、2段階認証や JavaScript 製ログイン画面のサイト（マイナビ・リクナビ）に
+対応するため、**手動ログイン＋セッション保存**方式を追加している
+（→「[ログインの2つの方式](#ログインの2つの方式)」）。
+
 ## 動作環境
 
 - Windows 10 / 11（64bit）
@@ -151,15 +155,58 @@ BIZREACH_CAMPUS_PASSWORD=********
 ### 6. 動作確認
 
 ```bat
-run.bat --list-sites     :: 定義されているサイトの一覧
+run.bat --list-sites     :: 定義されているサイトの一覧とログイン状態
 run.bat --dry-run        :: 書き込まずに検出結果だけ見る
 run.bat                  :: 実際にカレンダーへ登録
+login.bat mynavi         :: 手動ログインしてセッションを保存する
 ```
 
 `dry_run.bat` はダブルクリックで `--dry-run` を実行するためのショートカット。
 
 `--list-sites` と `--dry-run` は Google の認証情報が無くても動くので、
 まずここまで通ることを確認してから認証を設定してもよい。
+
+## ログインの2つの方式
+
+サイト定義には `login.mode` があり、2通りのログインの仕方を選べる。
+
+### `steps`（自動ログイン）
+
+`.env` に書いたメールアドレスとパスワードを、YAML に書いた手順どおりに
+入力してログインする。type就活・ビズリーチ・キャンパス・外資就活はこの方式。
+毎回まっさらなブラウザで動くので、準備は `.env` を書くだけで済む。
+
+### `manual`（手動ログイン＋セッション保存）
+
+最初の1回だけ人がブラウザでログインし、その状態（Cookie）を
+`.sessions\<slug>.json` に保存して以後は使い回す。マイナビとリクナビはこちら。
+
+```bat
+login.bat mynavi        :: ブラウザが開くので、手でログインして Enter
+run.bat --site mynavi --dry-run
+```
+
+**なぜ手動なのか。** マイナビのログインは My CareerID に転送され、
+見慣れないブラウザからだとメールに届く6桁の確認コードを要求される。
+毎回新しい Chromium を起動する自動ログインでは、ここで必ず止まる。
+リクナビは画面が JavaScript で組まれていて、ボタンの CSS クラス名が
+`styles_button__XwAS7` のようにビルドごとに変わるハッシュ付きになっており、
+YAML にセレクタを書いてもサイト更新のたびに壊れる。
+1回手でログインして状態を保存する方が、結果的に長く動く。
+
+保存したセッションはいつか切れる。切れると
+
+```
+マイナビ2027: ログイン状態が確認できません（URL が ... になっている）。
+次のコマンドでブラウザを開き、手でログインし直してください:
+    python main.py --login mynavi
+```
+
+と出るので、`login.bat mynavi` をやり直す。今の状態は `run.bat --list-sites`
+で確認できる（「手動ログイン: 保存済み（3.2 日前）」のように出る）。
+
+> `.sessions\` の中身はログイン済みの Cookie そのもので、パスワードと同じ重さがある。
+> `.gitignore` 済みだが、他人に渡るファイルに混ぜないこと。
 
 ## 定期実行（タスクスケジューラ）
 
@@ -248,13 +295,40 @@ copy sites\example_site.yaml sites\mynavi.yaml
 
 ### 同梱のサイト定義
 
-| slug | サイト | 状態 |
-|---|---|---|
-| `bizreach_campus` | ビズリーチ・キャンパス | 2026-04 動作確認 |
-| `type_shukatsu` | type就活 | 2026-04 動作確認 |
-| `gaishishukatsu` | 外資就活ドットコム | 要調整（0件しか取得できていない） |
+| slug | サイト | ログイン | 状態 |
+|---|---|---|---|
+| `bizreach_campus` | ビズリーチ・キャンパス | 自動 | 2026-04 動作確認 |
+| `type_shukatsu` | type就活 | 自動 | 2026-04 動作確認 |
+| `gaishishukatsu` | 外資就活ドットコム | 自動 | 要調整（0件しか取得できていない） |
+| `mynavi` | マイナビ2027 | 手動 | ログイン導線は確認済み。**一覧ページの締切パターンは未調整**（`enabled: false`） |
+| `rikunabi` | リクナビ | 手動 | ログイン方式のみ確認済み。**マイページの URL 差し替えが必要**（`enabled: false`） |
 
 サイト側の改修でセレクタは壊れる。動かなくなったら上の手順で YAML を直してほしい。
+
+### マイナビ・リクナビを使えるようにする
+
+この2つは `enabled: false` で同梱してある。実際のマイページの中身を見ないと
+締切行のパターンが決められないため、最後の調整だけ各自でやる必要がある。
+
+```bat
+login.bat mynavi
+.venv\Scripts\python.exe tools\inspect_site.py mynavi --grep 締切
+```
+
+`inspect_mynavi.txt` に画面のテキストが行番号つきで出るので、締切を示す行の形
+（`締切` だけの行か、`2026年5月21日まで` のような行か）と、企業名がその何行前に
+出るかを見て `sites\mynavi.yaml` の `deadline` と `company` を直す。
+できたら `run.bat --site mynavi --dry-run` で確認し、`enabled: true` にする。
+
+リクナビは一覧ページの URL 自体が未確定なので、まずログイン後に
+「エントリー状況」など締切が並ぶページまで進み、そのアドレスをコピーする。
+YAML を書き換える前に、その URL で直接試せる:
+
+```bat
+.venv\Scripts\python.exe tools\inspect_site.py rikunabi --url "https://job.rikunabi.com/……" --grep 締切
+```
+
+良さそうなら、その URL を `sites\rikunabi.yaml` の `listings[0].url` に貼る。
 
 ## 仕組み
 
@@ -283,9 +357,11 @@ YAML を直すだけで済む。
 ├── setup.bat                初回セットアップ（Windows）
 ├── run.bat                  実行（Windows）
 ├── dry_run.bat              --dry-run のショートカット
-├── main.py                  エントリポイント（--dry-run / --site / --list-sites）
+├── login.bat                手動ログインしてセッションを保存する
+├── main.py                  エントリポイント（--dry-run / --site / --list-sites / --login）
 ├── engine/
 │   ├── runtime.py           OS 差異の吸収（Windows 対応の中身はここ）
+│   ├── session.py           手動ログインした状態の保存・再利用
 │   ├── site_config.py       サイト定義 YAML の読み込みとバリデーション
 │   ├── scraper.py           YAML どおりに動く汎用スクレイパー
 │   ├── calendar_client.py   Google カレンダーへの登録・重複チェック
@@ -333,6 +409,7 @@ launchd を使う。
 | `service_account.json` | Google の秘密鍵 |
 | `credentials.json` / `token.json` | OAuth のクライアントシークレットとトークン |
 | `config.yaml` | カレンダー ID（個人のメールアドレス） |
+| `.sessions/` | ログイン済みの Cookie（マイナビ・リクナビ） |
 | `*.log` / `debug_*.png` / `inspect_*.txt` | 応募先の企業名など個人の就活状況 |
 
 一度コミットしてしまった秘密情報は、履歴から消してもリモートに残る可能性がある。

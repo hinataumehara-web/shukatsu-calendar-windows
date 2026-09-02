@@ -5,9 +5,12 @@
 """
 import logging
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from playwright.async_api import Page
+if TYPE_CHECKING:  # 型注釈のためだけの import。
+    # 実行時に読み込むと、playwright を入れていない環境（テストや
+    # --list-sites だけ動かしたいとき）でこのモジュールが使えなくなる
+    from playwright.async_api import Page
 
 from .dateparse import parse_date
 from .models import DeadlineEntry
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class GenericScraper:
-    def __init__(self, site: SiteConfig, page: Page, settings: dict, base_dir: str = "."):
+    def __init__(self, site: SiteConfig, page: "Page", settings: dict, base_dir: str = "."):
         self.site = site
         self.page = page
         self.settings = settings or {}
@@ -44,6 +47,10 @@ class GenericScraper:
             logger.info(f"{self.site.name}: ログイン不要の定義です")
             return
 
+        if self.site.uses_saved_session():
+            await self._verify_saved_session()
+            return
+
         creds = self.site.credentials()
         logger.info(f"{self.site.name}: ログイン中...")
         await self.page.goto(self.site.login_url, wait_until="domcontentloaded")
@@ -63,6 +70,52 @@ class GenericScraper:
                 "認証情報とセレクタを確認してください。"
             )
         logger.info(f"{self.site.name}: ログイン完了")
+
+    async def _verify_saved_session(self):
+        """保存済みセッションでログイン状態が続いているかを確かめる
+
+        login.mode: manual のサイトでは、パスワードを打ち込む代わりに
+        `python main.py --login <slug>` で保存したブラウザの状態を使う。
+        セッションが切れていれば、ここで分かりやすく止める。
+        """
+        check_url = self.site.listings[0].url if self.site.listings else self.site.login_url
+        logger.info(f"{self.site.name}: 保存済みセッションで確認中...")
+        await self.page.goto(check_url, wait_until="domcontentloaded")
+        await self.page.wait_for_timeout(self.settings.get("session_check_wait_ms", 3000))
+        await self._screenshot("session_check")
+
+        reason = await self._logged_out_reason()
+        if reason:
+            raise RuntimeError(
+                f"{self.site.name}: ログイン状態が確認できません（{reason}）。\n"
+                f"次のコマンドでブラウザを開き、手でログインし直してください:\n"
+                f"    python main.py --login {self.site.slug}"
+            )
+        logger.info(f"{self.site.name}: セッション有効")
+
+    async def _logged_out_reason(self):
+        """ログアウトされていると判断できる根拠を返す。ログイン中なら None"""
+        marker = self.site.login_success_url_not_contains
+        if marker and marker in self.page.url:
+            return f"URL が {self.page.url} になっている"
+
+        selector = self.site.login_success_selector
+        if selector:
+            try:
+                if await self.page.query_selector(selector) is None:
+                    return f"ログイン後にしか出ない要素 {selector} が見つからない"
+            except Exception as e:
+                return f"要素 {selector} の確認に失敗: {e}"
+
+        text = self.site.logged_out_marker
+        if text:
+            try:
+                body = await self.page.inner_text("body")
+            except Exception:
+                body = ""
+            if text in body:
+                return f"ページに「{text}」が表示されている"
+        return None
 
     async def _run_step(self, step: dict, creds: dict):
         action = step["action"]
