@@ -43,6 +43,7 @@ Windows では動かないか、動いても途中で落ちる箇所があった
 - Windows 10 / 11（64bit）
 - Python 3.10 以上（3.12 推奨）
 - ディスク空き容量 500MB 程度（Playwright が Chromium をダウンロードする）
+- VS Code, Google Antigravity, Cursorのコードエディタアプリのいずれかをインストールする
 
 ## セットアップ
 
