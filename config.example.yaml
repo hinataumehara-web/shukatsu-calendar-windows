@@ -27,6 +27,11 @@ google_calendar:
   reminder_days: [3, 1]   # 何日前に通知するか
 
 settings:
+  # 卒業予定年。マイナビのように URL に年度が入るサイトで使う
+  # （サイト定義の {grad_year} / {grad_yy} に埋め込まれる）
+  # 3年生・院1年なら「今の年度 + 2」。2026年度なら 2028
+  grad_year: 2028
+
   days_ahead: 90              # 何日先までの締切を対象にするか
   headless: true              # false にするとブラウザが表示される（デバッグ用）
   debug_screenshots: false    # true で各ステップのスクショを保存

@@ -132,13 +132,22 @@ class SetupWindow(tk.Tk):
         # 通知・期間
         opts = ttk.Frame(frame)
         opts.grid(row=5, column=0, columnspan=3, sticky="w", **PAD)
-        ttk.Label(opts, text="通知するタイミング（日前・カンマ区切り）").grid(row=0, column=0, sticky="w")
+
+        # 卒業予定年（マイナビのように URL に年度が入るサイトで使う）
+        ttk.Label(opts, text="卒業予定年").grid(row=0, column=0, sticky="w")
+        self.grad_year = tk.StringVar(value=str(setup_ops.grad_year(BASE_DIR)))
+        ttk.Spinbox(opts, from_=2020, to=2040, width=8,
+                    textvariable=self.grad_year).grid(row=0, column=1, padx=8)
+        ttk.Label(opts, text="（マイナビの URL に使われます。3年生・院1年なら今の年度+2）",
+                  foreground="#555").grid(row=0, column=2, columnspan=2, sticky="w")
+
+        ttk.Label(opts, text="通知するタイミング（日前・カンマ区切り）").grid(row=1, column=0, sticky="w")
         self.reminder_days = tk.StringVar(
             value=", ".join(str(d) for d in cal.get("reminder_days", [3, 1])))
-        ttk.Entry(opts, textvariable=self.reminder_days, width=12).grid(row=0, column=1, padx=8)
-        ttk.Label(opts, text="何日先まで拾うか").grid(row=0, column=2, sticky="w", padx=(20, 0))
+        ttk.Entry(opts, textvariable=self.reminder_days, width=12).grid(row=1, column=1, padx=8)
+        ttk.Label(opts, text="何日先まで拾うか").grid(row=1, column=2, sticky="w", padx=(20, 0))
         self.days_ahead = tk.StringVar(value=str(settings.get("days_ahead", 90)))
-        ttk.Entry(opts, textvariable=self.days_ahead, width=8).grid(row=0, column=3, padx=8)
+        ttk.Entry(opts, textvariable=self.days_ahead, width=8).grid(row=1, column=3, padx=8)
 
         # 診断結果
         self.google_status = tk.Text(frame, height=8, wrap="word", relief="solid", borderwidth=1)
@@ -374,6 +383,8 @@ class SetupWindow(tk.Tk):
             cal["google_calendar.reminder_days"] = days
         if self.days_ahead.get().strip().isdigit():
             settings["settings.days_ahead"] = int(self.days_ahead.get())
+        if self.grad_year.get().strip().isdigit():
+            settings["settings.grad_year"] = int(self.grad_year.get())
 
         for row in self.site_rows:
             w = self.site_widgets[row.slug]

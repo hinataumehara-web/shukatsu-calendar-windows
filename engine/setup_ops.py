@@ -10,7 +10,11 @@ import subprocess
 from dataclasses import dataclass, field
 
 from . import configfile, runtime, session
-from .site_config import load_site_configs
+from .site_config import (
+    build_variables,
+    load_site_configs,
+    suggest_grad_year,
+)
 
 TASK_NAME = "shukatsu-calendar"
 
@@ -35,6 +39,26 @@ def pythonw_exe(base_dir: str) -> str:
 
 
 # ------------------------------------------------------------------- サイト
+def load_config(base_dir: str) -> dict:
+    """config.yaml を読む。無ければ空（設定画面は config.yaml 無しでも開ける）"""
+    import yaml
+
+    path = os.path.join(base_dir, "config.yaml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8-sig") as f:
+        return yaml.safe_load(f) or {}
+
+
+def grad_year(base_dir: str) -> int:
+    """設定済みの卒業予定年。未設定なら今の学年から推定した候補を返す"""
+    value = (load_config(base_dir).get("settings") or {}).get("grad_year")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return suggest_grad_year()
+
+
 @dataclass
 class SiteRow:
     """画面に1行として出すサイトの状態"""
@@ -47,6 +71,7 @@ class SiteRow:
     session_state: str = ""
     path: str = ""
     env_values: dict = field(default_factory=dict)
+    unresolved: list = field(default_factory=list)
 
     @property
     def needs_credentials(self) -> bool:
@@ -55,8 +80,9 @@ class SiteRow:
 
 def list_sites(base_dir: str) -> list:
     env = configfile.load_env(os.path.join(base_dir, ".env"))
+    variables = build_variables(load_config(base_dir))
     rows = []
-    for site in load_site_configs(os.path.join(base_dir, "sites")):
+    for site in load_site_configs(os.path.join(base_dir, "sites"), variables):
         rows.append(SiteRow(
             slug=site.slug,
             name=site.name,
@@ -66,6 +92,7 @@ def list_sites(base_dir: str) -> list:
             password_env=site.password_env,
             session_state=session.describe(base_dir, site.slug) if site.uses_saved_session() else "",
             path=os.path.join(base_dir, "sites", f"{site.slug}.yaml"),
+            unresolved=site.unresolved_variables(),
             env_values={
                 "email": env.get(site.email_env, ""),
                 "password": env.get(site.password_env, ""),

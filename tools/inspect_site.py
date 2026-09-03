@@ -26,7 +26,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
 from engine import runtime, session  # noqa: E402
-from engine.site_config import load_site_configs  # noqa: E402
+from engine.site_config import build_variables, load_site_configs  # noqa: E402
+
+
+def _variables() -> dict:
+    """config.yaml から URL に埋める値（卒業年など）を読む。無くても動く"""
+    import yaml
+
+    path = os.path.join(BASE_DIR, "config.yaml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8-sig") as f:
+        return build_variables(yaml.safe_load(f) or {})
 
 
 async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | None,
@@ -35,7 +46,8 @@ async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | Non
 
     from engine.scraper import GenericScraper
 
-    sites = {s.slug: s for s in load_site_configs(os.path.join(BASE_DIR, "sites"))}
+    sites = {s.slug: s for s in
+             load_site_configs(os.path.join(BASE_DIR, "sites"), _variables())}
     if slug not in sites:
         print(f"サイト定義が見つかりません: {slug}")
         print(f"利用可能: {', '.join(sorted(sites))}")
@@ -43,6 +55,12 @@ async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | Non
     site = sites[slug]
     listing = site.listings[listing_index]
     target_url = url or listing.url
+
+    todo = site.unresolved_variables()
+    if todo and not url:
+        print(f"URL に埋める値（{'、'.join(todo)}）が決まっていません。")
+        print("config.yaml の settings.grad_year に卒業予定年を入れてください。")
+        return 1
 
     storage_state = None
     if site.uses_saved_session():

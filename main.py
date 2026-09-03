@@ -36,7 +36,12 @@ sys.path.insert(0, BASE_DIR)
 # calendar_client は google 系ライブラリを読み込むので、ここでは import しない。
 # --list-sites / --dry-run は Google の認証情報が無くても動くようにしたい。
 from engine import ics, runtime, session  # noqa: E402
-from engine.site_config import SiteConfigError, load_site_configs  # noqa: E402
+from engine.site_config import (  # noqa: E402
+    SiteConfigError,
+    build_variables,
+    load_site_configs,
+    suggest_grad_year,
+)
 
 logger = logging.getLogger("shukatsu")
 
@@ -219,13 +224,16 @@ async def main_async(args):
     settings = config.get("settings", {})
     calendar_config = config.get("google_calendar", {})
 
-    sites = load_site_configs(os.path.join(BASE_DIR, "sites"))
+    variables = build_variables(config)
+    sites = load_site_configs(os.path.join(BASE_DIR, "sites"), variables)
 
     if args.list_sites:
         for s in sites:
             state = "有効" if s.enabled else "無効"
             auth = f"手動ログイン: {session.describe(BASE_DIR, s.slug)}" if s.uses_saved_session() else "自動ログイン"
-            output(f"  {s.slug:<20} {s.name:<22} [{state}] 一覧 {len(s.listings)} / {auth}")
+            todo = s.unresolved_variables()
+            note = f" / 要設定: {', '.join(todo)}" if todo else ""
+            output(f"  {s.slug:<20} {s.name:<22} [{state}] 一覧 {len(s.listings)} / {auth}{note}")
         return 0
 
     if args.login:
@@ -238,6 +246,19 @@ async def main_async(args):
     targets = [s for s in sites if (s.slug in args.site) or (not args.site and s.enabled)]
     if not targets:
         logger.error("実行対象のサイトがありません（--list-sites で確認してください）")
+        return 1
+
+    unset = [s for s in targets if s.unresolved_variables()]
+    for s in unset:
+        names = "、".join(s.unresolved_variables())
+        logger.error(
+            f"{s.name}: URL に埋める値（{names}）が決まっていません。\n"
+            f"  config.yaml の settings.grad_year に卒業予定年を入れてください"
+            f"（例: grad_year: {suggest_grad_year()}）。\n"
+            f"  設定画面（setup_gui.bat）の「卒業予定年」からも設定できます。"
+        )
+    targets = [s for s in targets if s not in unset]
+    if not targets:
         return 1
 
     missing = [s for s in targets if s.uses_saved_session() and not session.exists(BASE_DIR, s.slug)]

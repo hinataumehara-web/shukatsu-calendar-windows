@@ -1,5 +1,9 @@
 # ============================================================================
-# マイナビ2027
+# マイナビ
+#
+# URL に卒業年が入る（マイナビ2028 なら /28/）。年度は直接書かず、
+# config.yaml の settings.grad_year から {grad_yy} に埋められる。
+# 卒業年が違う人に渡しても、この定義を書き換える必要はない。
 #
 # 状態: ログイン方法まで確認済み。一覧ページの締切パターンは未調整（enabled: false）
 #
@@ -14,6 +18,7 @@
 #
 # 使い始めるまでの手順
 # --------------------
+#   0. config.yaml の settings.grad_year に卒業予定年を入れる（例: 2028）
 #   1. python main.py --login mynavi         ブラウザが開くので手でログイン
 #   2. python tools/inspect_site.py mynavi --grep 締切
 #      → inspect_mynavi.txt に表示テキストが行番号つきで出る
@@ -22,10 +27,10 @@
 #   4. python main.py --site mynavi --dry-run で確認できたら enabled: true
 #
 # 別のページを見たいときは URL を直接指定できる:
-#     python tools/inspect_site.py mynavi --url "https://job.mynavi.jp/27/pc/user/displayMypageMenu/index"
+#     python tools/inspect_site.py mynavi --url "https://job.mynavi.jp/28/pc/user/displayMypageMenu/index"
 # ============================================================================
 
-name: "マイナビ2027"
+name: "マイナビ"
 enabled: false          # 一覧ページの調整が済んでから true にする
 
 # manual 方式なのでメールアドレス・パスワードは使わない（.env への追記も不要）
@@ -34,7 +39,7 @@ credentials: {}
 login:
   mode: manual
   # ここを開くと My CareerID のログイン画面へ転送される（2026-09 時点で確認済み）
-  url: "https://job.mynavi.jp/27/pc/common/displayRelayScreen/displayForLogin"
+  url: "https://job.mynavi.jp/{grad_yy}/pc/common/displayRelayScreen/displayForLogin"
   success_check:
     # セッションが切れると、マイページを開いても ID 基盤に飛ばされる。
     # 遷移先の URL にこの文字列が含まれていたらログアウト扱いにする
@@ -42,7 +47,7 @@ login:
 
 listings:
   # マイページの「スケジュール」。エントリー締切や説明会の予定が並ぶ想定
-  - url: "https://job.mynavi.jp/27/pc/user/displaySchedule/index"
+  - url: "https://job.mynavi.jp/{grad_yy}/pc/user/displaySchedule/index"
     wait_ms: 4000
     title_prefix: "【マイナビ】"
 
@@ -72,7 +77,7 @@ listings:
         - '^(オンライン|対面|WEB)$'
 
   # 予約リスト（説明会・セミナーの申込一覧）。不要なら丸ごと削ってよい
-  - url: "https://job.mynavi.jp/27/pc/search/bookmark_list/entry_reserve_all.html"
+  - url: "https://job.mynavi.jp/{grad_yy}/pc/search/bookmark_list/entry_reserve_all.html"
     wait_ms: 4000
     title_prefix: "【マイナビ】"
     deadline:

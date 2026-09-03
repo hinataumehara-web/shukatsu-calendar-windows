@@ -6,6 +6,7 @@ Python を書かずに YAML だけで対応サイトを増やせるようにす�
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +19,46 @@ VALID_ACTIONS = {"goto", "click", "fill", "type", "press", "wait", "select"}
 VALID_LOGIN_MODES = {"steps", "manual"}
 VALID_MATCH_MODES = {"exact", "regex", "keyword"}
 VALID_DATE_SOURCES = {"same_line", "next_line", "context"}
+
+# URL に埋め込める変数。マイナビのように卒業年が URL に入るサイトのため、
+# サイト定義に年度を直接書かず、config.yaml の設定から埋める
+_PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+
+
+def suggest_grad_year(today: Optional[date] = None) -> int:
+    """卒業予定年の初期候補
+
+    日本の年度は4月始まり。インターンや早期選考を主に見るのは3年生（院1年）で、
+    その学年の卒業年は「今の年度 + 2」になる。
+    （2026年9月なら2026年度なので 2028）
+    """
+    today = today or date.today()
+    fiscal_year = today.year if today.month >= 4 else today.year - 1
+    return fiscal_year + 2
+
+
+def build_variables(config: dict) -> dict:
+    """config.yaml から、サイト定義の URL に埋める値を作る"""
+    settings = (config or {}).get("settings", {}) or {}
+    grad_year = settings.get("grad_year")
+    if not grad_year:
+        return {}
+    grad_year = int(grad_year)
+    return {
+        "grad_year": str(grad_year),          # 2028
+        "grad_yy": f"{grad_year % 100:02d}",  # 28
+    }
+
+
+def _substitute(text: str, variables: dict) -> str:
+    if not text or "{" not in text:
+        return text
+    return _PLACEHOLDER.sub(
+        lambda m: variables.get(m.group(1), m.group(0)), text)
+
+
+def _unresolved(text: str) -> list:
+    return _PLACEHOLDER.findall(text or "")
 
 
 class SiteConfigError(ValueError):
@@ -116,6 +157,17 @@ class SiteConfig:
             creds[label] = value
         return creds
 
+    def unresolved_variables(self) -> list:
+        """URL に残っている、まだ値が決まっていない変数名
+
+        例: config.yaml に settings.grad_year が無いまま
+        マイナビの定義を使うと ["grad_yy"] が返る。
+        """
+        names = set(_unresolved(self.login_url))
+        for listing in self.listings:
+            names.update(_unresolved(listing.url))
+        return sorted(names)
+
     def requires_login(self) -> bool:
         if self.login_mode == "manual":
             return True
@@ -144,7 +196,7 @@ def _validate_steps(name: str, steps: list) -> list[dict]:
     return out
 
 
-def parse_site_config(raw: dict, slug: str = "") -> SiteConfig:
+def parse_site_config(raw: dict, slug: str = "", variables: Optional[dict] = None) -> SiteConfig:
     if not isinstance(raw, dict):
         raise SiteConfigError(f"[{slug}] YAML のトップレベルはマッピングである必要があります")
 
@@ -174,7 +226,7 @@ def parse_site_config(raw: dict, slug: str = "") -> SiteConfig:
         deadline = DeadlineRule(**(item.get("deadline") or {}))
         company = CompanyRule(**(item.get("company") or {}))
         listings.append(Listing(
-            url=item["url"],
+            url=_substitute(item["url"], variables or {}),
             wait_ms=int(item.get("wait_ms", 3000)),
             title_prefix=item.get("title_prefix", ""),
             drop_empty_lines=bool(item.get("drop_empty_lines", True)),
@@ -198,7 +250,7 @@ def parse_site_config(raw: dict, slug: str = "") -> SiteConfig:
         email_env=creds.get("email_env", ""),
         password_env=creds.get("password_env", ""),
         login_mode=login_mode,
-        login_url=login.get("url", ""),
+        login_url=_substitute(login.get("url", ""), variables or {}),
         login_steps=_validate_steps(name, login.get("steps")),
         login_success_url_not_contains=success_check.get("url_not_contains", ""),
         login_success_selector=success_check.get("selector", ""),
@@ -207,8 +259,14 @@ def parse_site_config(raw: dict, slug: str = "") -> SiteConfig:
     )
 
 
-def load_site_configs(sites_dir: str | Path) -> list[SiteConfig]:
-    """sites/*.yaml をすべて読み込む（ファイル名順）"""
+def load_site_configs(sites_dir: str | Path,
+                      variables: Optional[dict] = None) -> list[SiteConfig]:
+    """sites/*.yaml をすべて読み込む（ファイル名順）
+
+    variables を渡すと、URL 中の {grad_yy} のような変数を置き換える。
+    渡さない、または値が足りない場合はそのまま残るので、
+    SiteConfig.unresolved_variables() で検出できる。
+    """
     sites_dir = Path(sites_dir)
     if not sites_dir.is_dir():
         raise SiteConfigError(f"サイト定義ディレクトリが見つかりません: {sites_dir}")
@@ -219,5 +277,5 @@ def load_site_configs(sites_dir: str | Path) -> list[SiteConfig]:
             raw = yaml.safe_load(f)
         if raw is None:
             continue
-        configs.append(parse_site_config(raw, slug=path.stem))
+        configs.append(parse_site_config(raw, slug=path.stem, variables=variables))
     return configs

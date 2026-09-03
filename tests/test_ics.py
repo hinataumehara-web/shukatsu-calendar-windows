@@ -158,10 +158,13 @@ def test_ics_mode_does_not_require_config_yaml():
     import subprocess
 
     repo = Path(__file__).resolve().parents[1]
-    assert not (repo / "config.yaml").exists(), "テストは config.yaml が無い前提"
+    # 手元に config.yaml があってもなくても同じことを確かめられるよう、
+    # 存在しないパスを明示的に渡す
+    missing = repo / "does-not-exist" / "config.yaml"
 
     result = subprocess.run(
-        [sys.executable, str(repo / "main.py"), "--ics", "--list-sites"],
+        [sys.executable, str(repo / "main.py"), "--ics", "--list-sites",
+         "--config", str(missing)],
         capture_output=True, text=True, encoding="utf-8", cwd=str(repo),
     )
     assert result.returncode == 0, result.stderr
