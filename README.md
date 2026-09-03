@@ -60,6 +60,7 @@ Python を入れて `setup.bat` → `setup_gui.bat`（設定画面）→ `ics.ba
 - Windows 10 / 11（64bit）
 - Python 3.10 以上（3.12 推奨）
 - ディスク空き容量 500MB 程度（Playwright が Chromium をダウンロードする）
+- VS Code, Google Antigravity, Cursorのコードエディタアプリのいずれかをインストールする（不要）
 
 ## セットアップ
 
