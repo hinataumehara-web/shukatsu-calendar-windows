@@ -25,7 +25,17 @@ jobs:
         # スクレイピング用の重い依存（playwright など）はテストに不要
         run: pip install pyyaml pytest
 
+      # 設定画面のテストは実際に Tk のウィンドウを組み立てるので、
+      # Linux では仮想ディスプレイが要る（無ければそのテストだけスキップされる）
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb
+          xvfb-run -a pytest -q
+
       - name: Run tests
+        if: runner.os != 'Linux'
         run: pytest -q
 
       - name: Byte-compile all sources

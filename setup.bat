@@ -72,15 +72,14 @@ echo.
 echo ============================================================
 echo  Setup finished. No Google Cloud account needed.
 echo.
-echo  Next steps (see README.md for details):
-echo   1. Edit .env      - login for sites that use automatic login
-echo      or run login.bat mynavi  - for sites you log in by hand
-echo   2. dry_run.bat    - check what would be picked up
-echo   3. ics.bat        - write shukatsu.ics and import it into
-echo                       your calendar. That is all you need.
+echo  Next step: double-click setup_gui.bat
 echo.
-echo  Optional: to write into Google Calendar directly instead of
-echo  importing a file, run setup_google.bat and read the README.
+echo  That opens a settings window where you can pick which sites
+echo  to use, log in, test, and set up the daily schedule without
+echo  editing any files by hand.
+echo.
+echo  Prefer the command line? dry_run.bat then ics.bat.
+echo  To write into Google Calendar directly, run setup_google.bat.
 echo ============================================================
 echo.
 pause
