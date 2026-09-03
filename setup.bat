@@ -70,13 +70,17 @@ if not exist "config.yaml" copy /y "config.example.yaml" "config.yaml" >nul
 
 echo.
 echo ============================================================
-echo  Setup finished.
+echo  Setup finished. No Google Cloud account needed.
 echo.
 echo  Next steps (see README.md for details):
-echo   1. Edit .env         - login e-mail / password for each site
-echo   2. Edit config.yaml  - your Google Calendar ID
-echo   3. Put service_account.json in this folder
-echo   4. Double-click dry_run.bat to check without writing
+echo   1. Edit .env      - login for sites that use automatic login
+echo      or run login.bat mynavi  - for sites you log in by hand
+echo   2. dry_run.bat    - check what would be picked up
+echo   3. ics.bat        - write shukatsu.ics and import it into
+echo                       your calendar. That is all you need.
+echo.
+echo  Optional: to write into Google Calendar directly instead of
+echo  importing a file, run setup_google.bat and read the README.
 echo ============================================================
 echo.
 pause

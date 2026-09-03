@@ -35,7 +35,7 @@ sys.path.insert(0, BASE_DIR)
 
 # calendar_client は google 系ライブラリを読み込むので、ここでは import しない。
 # --list-sites / --dry-run は Google の認証情報が無くても動くようにしたい。
-from engine import runtime, session  # noqa: E402
+from engine import ics, runtime, session  # noqa: E402
 from engine.site_config import SiteConfigError, load_site_configs  # noqa: E402
 
 logger = logging.getLogger("shukatsu")
@@ -70,14 +70,21 @@ def output(text: str):
         logger.info(text)
 
 
-def load_config(path: str | None = None) -> dict:
+def load_config(path: str | None = None, required: bool = True) -> dict:
     path = path or os.path.join(BASE_DIR, "config.yaml")
     if not os.path.exists(path):
+        if not required:
+            # ICS 方式なら config.yaml が無くても既定値で動く
+            return {}
         copy_cmd = ("copy config.example.yaml config.yaml" if runtime.IS_WINDOWS
                     else "cp config.example.yaml config.yaml")
         raise SystemExit(
             f"{path} がありません。config.example.yaml をコピーして作成してください:\n"
-            f"    {copy_cmd}"
+            f"    {copy_cmd}\n"
+            "\n"
+            "なお、Google カレンダーの設定をせずに使うこともできます。\n"
+            "その場合 config.yaml は不要です:\n"
+            "    " + ("ics.bat" if runtime.IS_WINDOWS else "python main.py --ics")
         )
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
@@ -186,8 +193,29 @@ async def login_site(site, settings: dict):
     return 0
 
 
+def write_ics(entries, path_arg: str, calendar_config: dict) -> int:
+    """締切を .ics に書き出し、取り込み方を案内する"""
+    path = path_arg if os.path.isabs(path_arg) else os.path.join(BASE_DIR, path_arg)
+    ics.write(
+        path, entries,
+        event_tag=calendar_config.get("event_tag", "[就活自動登録]"),
+        reminder_days=calendar_config.get("reminder_days", [3, 1]),
+        calendar_name=calendar_config.get("calendar_name", "就活の締切"),
+    )
+    logger.info(f"{len(entries)} 件を {path} に書き出しました")
+    output("")
+    output(f"  {path} を作りました。カレンダーに取り込んでください。")
+    output("")
+    output("  Google カレンダー:")
+    output("    https://calendar.google.com/calendar/u/0/r/settings/export")
+    output("    →「インポート」でこのファイルを選ぶ")
+    output("")
+    output("  同じ締切は同じ ID を持たせてあるので、毎日取り込み直しても重複しません。")
+    return 0
+
+
 async def main_async(args):
-    config = load_config(args.config)
+    config = load_config(args.config, required=not args.ics)
     settings = config.get("settings", {})
     calendar_config = config.get("google_calendar", {})
 
@@ -223,8 +251,17 @@ async def main_async(args):
         return 1
 
     cal = None
-    if not args.dry_run:
-        from engine.calendar_client import CalendarClient
+    if not args.dry_run and not args.ics:
+        try:
+            from engine.calendar_client import CalendarClient
+        except ImportError as e:
+            logger.error(
+                f"Google カレンダー API 用のライブラリが入っていません（{e}）。\n"
+                "  この方式を使うなら setup_google.bat を実行してください。\n"
+                "  Google の設定をしたくない場合は、代わりに ICS 方式が使えます:\n"
+                "      run.bat --ics        （または ics.bat をダブルクリック）"
+            )
+            return 1
 
         cal = CalendarClient(calendar_config, base_dir=BASE_DIR)
         cal.authenticate()
@@ -238,9 +275,14 @@ async def main_async(args):
     if not all_entries:
         return 0
 
-    if args.dry_run:
+    if args.dry_run or args.ics:
         for e in sorted(all_entries, key=lambda x: x.deadline):
             output(f"  {e.deadline}  [{e.source}] {e.company} / {e.event_title}")
+
+    if args.ics:
+        return write_ics(all_entries, args.ics, calendar_config)
+
+    if args.dry_run:
         logger.info("dry-run のためカレンダーには書き込みませんでした")
         return 0
 
@@ -259,6 +301,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="カレンダーに書き込まず、検出した締切を表示するだけ")
     parser.add_argument("--list-sites", action="store_true", help="サイト定義の一覧を表示")
+    parser.add_argument("--ics", nargs="?", const="shukatsu.ics", metavar="PATH",
+                        help="Google API を使わず、締切を .ics ファイルに書き出す"
+                             "（既定: shukatsu.ics）")
     parser.add_argument("--login", metavar="SLUG",
                         help="ブラウザを開いて手動ログインし、その状態を保存する"
                              "（login.mode: manual のサイト用）")

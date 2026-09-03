@@ -1,6 +1,5 @@
+# 基本セット。これだけで「サイト巡回 → .ics 書き出し」まで動く。
+# Google カレンダー API に直接書き込む方式を使う場合のみ、
+# requirements-google.txt も入れる（setup_google.bat）。
 playwright==1.44.0
-google-api-python-client==2.131.0
-google-auth==2.29.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
 pyyaml==6.0.1

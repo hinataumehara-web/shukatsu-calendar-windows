@@ -38,9 +38,20 @@ Windows では動かないか、動いても途中で落ちる箇所があった
 | `.gitattributes` で `.bat` を CRLF 固定 | clone の設定次第で LF になり、cmd.exe が誤動作する |
 | CI を Windows / macOS / Ubuntu × Python 3.10・3.12 に | Windows で壊れたことに気づけるようにする |
 
-あわせて、2段階認証や JavaScript 製ログイン画面のサイト（マイナビ・リクナビ）に
-対応するため、**手動ログイン＋セッション保存**方式を追加している
-（→「[ログインの2つの方式](#ログインの2つの方式)」）。
+あわせて2つ機能を足している。
+
+- **手動ログイン＋セッション保存** — 2段階認証や JavaScript 製ログイン画面のサイト
+  （マイナビ・リクナビ）向け（→「[ログインの2つの方式](#ログインの2つの方式)」）
+- **ICS 書き出し** — Google Cloud の設定を一切せずに使える方式。
+  人に勧めるときの一番の障壁がこれで消える（→「[5. カレンダーへの入れ方を選ぶ](#5-カレンダーへの入れ方を選ぶ)」）
+
+## 人に渡すとき
+
+友人に渡すなら [QUICKSTART.md](QUICKSTART.md) を読んでもらえば足ります。
+Python を入れて `setup.bat` → `login.bat` → `ics.bat` の3つを押すだけで、
+Google アカウントの設定は一切要りません（10分ほど）。
+
+以下は、仕組みまで含めて把握したい人向けの詳しい説明です。
 
 ## 動作環境
 
@@ -95,6 +106,7 @@ Git を入れていないなら、GitHub の緑の **Code** ボタン →
 4. `.env` と `config.yaml` を雛形からコピーする
 
 完了まで数分かかる。`Setup finished.` と出れば成功。
+**Google アカウントの設定はここでは要らない。**
 
 <details>
 <summary>コマンドで手動でやる場合</summary>
@@ -130,7 +142,43 @@ BIZREACH_CAMPUS_PASSWORD=********
 > **注意**: エクスプローラーで新規作成すると `.env.txt` になりがち。
 > 「表示」→「ファイル名拡張子」にチェックを入れて、名前が `.env` であることを確認する。
 
-### 5. Google カレンダーの認証（サービスアカウント方式・推奨）
+### 5. カレンダーへの入れ方を選ぶ
+
+締切をカレンダーに入れる方法は2つある。**普通は A で十分。**
+
+| | A. ICS ファイル方式 | B. Google カレンダー API 方式 |
+|---|---|---|
+| 準備 | **なし** | Google Cloud で20分ほどの設定 |
+| 追加インストール | なし | `setup_google.bat` |
+| 毎日の手間 | ファイルを取り込む（数秒） | 全自動 |
+| 重複 | 起きない（同じ ID を付けてある） | 起きない |
+| 対応カレンダー | Google / Outlook / Apple | Google のみ |
+
+#### A. ICS ファイル方式（既定・準備なし）
+
+`ics.bat` をダブルクリックすると `shukatsu.ics` ができ、Google カレンダーの
+インポート画面を開くか聞かれる。あとはそのファイルを選ぶだけ。
+
+```bat
+ics.bat                      :: shukatsu.ics を作る
+run.bat --ics                :: 同じこと（コマンドから）
+run.bat --ics C:\path\my.ics :: 出力先を指定する
+```
+
+Google カレンダーなら
+[設定 → インポート／エクスポート](https://calendar.google.com/calendar/u/0/r/settings/export)、
+Outlook なら「予定表を追加 → ファイルからインポート」、
+Apple カレンダーなら .ics をダブルクリック。
+
+**毎日取り込み直しても重複しない。** 予定ごとの ID（`UID`）を
+「出典・企業名・タイトル・締切日」から決まる固定値にしてあるので、
+カレンダー側が「新規追加」ではなく「同じ予定の更新」として扱う。
+3日前・前日の通知もファイルに含まれている。
+
+#### B. Google カレンダーに直接書き込む
+
+毎朝の取り込み操作すら省きたい場合はこちら。まず `setup_google.bat` を実行して
+ライブラリを入れ、次の設定をする。
 
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作り、
    **Google Calendar API** を有効化する
@@ -156,15 +204,15 @@ BIZREACH_CAMPUS_PASSWORD=********
 
 ```bat
 run.bat --list-sites     :: 定義されているサイトの一覧とログイン状態
-run.bat --dry-run        :: 書き込まずに検出結果だけ見る
-run.bat                  :: 実際にカレンダーへ登録
+run.bat --dry-run        :: 何も書かずに検出結果だけ見る
 login.bat mynavi         :: 手動ログインしてセッションを保存する
+ics.bat                  :: shukatsu.ics を作る（A 方式）
+run.bat                  :: Google カレンダーへ直接登録（B 方式）
 ```
 
-`dry_run.bat` はダブルクリックで `--dry-run` を実行するためのショートカット。
+`dry_run.bat` / `ics.bat` はダブルクリックでも動く。
 
-`--list-sites` と `--dry-run` は Google の認証情報が無くても動くので、
-まずここまで通ることを確認してから認証を設定してもよい。
+`--list-sites` `--dry-run` `--ics` は Google の設定が一切無くても動く。
 
 ## ログインの2つの方式
 
@@ -210,7 +258,9 @@ YAML にセレクタを書いてもサイト更新のたびに壊れる。
 
 ## 定期実行（タスクスケジューラ）
 
-毎朝8時に自動で実行する設定。
+毎朝8時に自動で実行する設定。**Google API 方式（B）で使うときの話**で、
+ICS 方式（A）なら「見たいときに `ics.bat` を押す」で足りるので、
+無理に設定しなくてよい。
 
 ### GUI で設定する
 
@@ -358,10 +408,13 @@ YAML を直すだけで済む。
 ├── run.bat                  実行（Windows）
 ├── dry_run.bat              --dry-run のショートカット
 ├── login.bat                手動ログインしてセッションを保存する
-├── main.py                  エントリポイント（--dry-run / --site / --list-sites / --login）
+├── ics.bat                  shukatsu.ics を作る（Google の設定なしで使う方式）
+├── setup_google.bat         Google API 方式を使う場合だけ実行する
+├── main.py                  エントリポイント（--dry-run / --ics / --site / --login）
 ├── engine/
 │   ├── runtime.py           OS 差異の吸収（Windows 対応の中身はここ）
 │   ├── session.py           手動ログインした状態の保存・再利用
+│   ├── ics.py               .ics（iCalendar）の書き出し
 │   ├── site_config.py       サイト定義 YAML の読み込みとバリデーション
 │   ├── scraper.py           YAML どおりに動く汎用スクレイパー
 │   ├── calendar_client.py   Google カレンダーへの登録・重複チェック
@@ -383,6 +436,7 @@ python3 -m venv .venv
 cp .env.example .env
 cp config.example.yaml config.yaml
 .venv/bin/python main.py --dry-run
+.venv/bin/python main.py --ics          # .ics を書き出す（Google の設定不要）
 ```
 
 定期実行は cron（`0 8 * * * cd /path/to/shukatsu-calendar && .venv/bin/python main.py`）か
@@ -410,6 +464,7 @@ launchd を使う。
 | `credentials.json` / `token.json` | OAuth のクライアントシークレットとトークン |
 | `config.yaml` | カレンダー ID（個人のメールアドレス） |
 | `.sessions/` | ログイン済みの Cookie（マイナビ・リクナビ） |
+| `*.ics` | 書き出した締切（応募先の企業名が並ぶ） |
 | `*.log` / `debug_*.png` / `inspect_*.txt` | 応募先の企業名など個人の就活状況 |
 
 一度コミットしてしまった秘密情報は、履歴から消してもリモートに残る可能性がある。
