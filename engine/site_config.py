@@ -18,6 +18,11 @@ VALID_ACTIONS = {"goto", "click", "fill", "type", "press", "wait", "select"}
 #          （2段階認証や JavaScript 製ログイン画面のサイト向け）
 VALID_LOGIN_MODES = {"steps", "manual"}
 VALID_MATCH_MODES = {"exact", "regex", "keyword"}
+# 会社名をどこから拾うか
+#   before … 締切行の手前を遡る（一覧ページ向け。既定）
+#   top    … ページ先頭から最初の候補を採る（詳細ページ向け。
+#            会社名がページの一番上にあり、締切は下の方にあるため）
+VALID_COMPANY_PICKS = {"before", "top"}
 VALID_DATE_SOURCES = {"same_line", "next_line", "context"}
 
 # URL に埋め込める変数。マイナビのように卒業年が URL に入るサイトのため、
@@ -67,15 +72,30 @@ class SiteConfigError(ValueError):
 
 @dataclass
 class CompanyRule:
-    """締切行の手前を遡って会社名・タイトルを拾うためのルール"""
+    """会社名・タイトルを拾うためのルール"""
     lookback: int = 8
     min_length: int = 4
+    pick: str = "before"
+    # 「ラベル → 値」の順で並ぶページ（詳細ページに多い）向け。
+    # ここに挙げた語の *次の行* は、その値とみなして飛ばす。
+    # 「募集人数 / 30名」の 30名 をコース名と誤認しないため。
+    # skip_exact と分けてあるのは、「仕事体験」のような見出しの直後には
+    # 拾いたい行（コース名）が来るため。値を伴うラベルだけをここに書く
+    value_labels: list[str] = field(default_factory=list)
     skip_exact: list[str] = field(default_factory=list)
     skip_patterns: list[str] = field(default_factory=list)
 
     def __post_init__(self):
+        if self.pick not in VALID_COMPANY_PICKS:
+            raise SiteConfigError(
+                f"company.pick は {sorted(VALID_COMPANY_PICKS)} のいずれか: {self.pick!r}")
         self._compiled = [re.compile(p) for p in self.skip_patterns]
         self._skip_exact = set(self.skip_exact)
+        self._value_labels = set(self.value_labels)
+
+    def is_value_label(self, line: str) -> bool:
+        """この行の次に「値」が来るか"""
+        return line in self._value_labels
 
     def is_noise(self, line: str) -> bool:
         if not line or len(line) < self.min_length:
@@ -114,6 +134,31 @@ class DeadlineRule:
 
 
 @dataclass
+class FollowRule:
+    """一覧から各ページへ辿って、そちらで締切を読むための設定
+
+    マイナビのように、一覧には「締切間近」としか書かれておらず、
+    実際の日付が各社のコース情報ページにしかない場合に使う。
+    """
+    link_text: str
+    max_pages: int = 30
+    delay_ms: int = 1500
+    wait_ms: int = 3000
+    title_prefix: str = ""
+    skip_if_context_contains: list[str] = field(default_factory=list)
+    deadline: "DeadlineRule" = None
+    company: "CompanyRule" = None
+
+    def __post_init__(self):
+        if not self.link_text:
+            raise SiteConfigError("follow.link_text は必須です（辿るリンクの文字）")
+        if self.max_pages < 1:
+            raise SiteConfigError(f"follow.max は1以上: {self.max_pages}")
+        self.deadline = self.deadline or DeadlineRule()
+        self.company = self.company or CompanyRule()
+
+
+@dataclass
 class Listing:
     """1つの一覧ページ"""
     url: str
@@ -124,6 +169,7 @@ class Listing:
     skip_if_context_contains: list[str] = field(default_factory=list)
     deadline: DeadlineRule = field(default_factory=DeadlineRule)
     company: CompanyRule = field(default_factory=CompanyRule)
+    follow: Optional[FollowRule] = None
 
 
 @dataclass
@@ -196,6 +242,23 @@ def _validate_steps(name: str, steps: list) -> list[dict]:
     return out
 
 
+def _parse_follow(name: str, index: int, raw) -> Optional[FollowRule]:
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        raise SiteConfigError(f"[{name}] listings[{index}].follow はマッピングである必要があります")
+    return FollowRule(
+        link_text=raw.get("link_text", ""),
+        max_pages=int(raw.get("max", 30)),
+        delay_ms=int(raw.get("delay_ms", 1500)),
+        wait_ms=int(raw.get("wait_ms", 3000)),
+        title_prefix=raw.get("title_prefix", ""),
+        skip_if_context_contains=raw.get("skip_if_context_contains") or [],
+        deadline=DeadlineRule(**(raw.get("deadline") or {})),
+        company=CompanyRule(**(raw.get("company") or {})),
+    )
+
+
 def parse_site_config(raw: dict, slug: str = "", variables: Optional[dict] = None) -> SiteConfig:
     if not isinstance(raw, dict):
         raise SiteConfigError(f"[{slug}] YAML のトップレベルはマッピングである必要があります")
@@ -225,6 +288,7 @@ def parse_site_config(raw: dict, slug: str = "", variables: Optional[dict] = Non
             raise SiteConfigError(f"[{name}] listings[{i}] に url がありません")
         deadline = DeadlineRule(**(item.get("deadline") or {}))
         company = CompanyRule(**(item.get("company") or {}))
+        follow = _parse_follow(name, i, item.get("follow"))
         listings.append(Listing(
             url=_substitute(item["url"], variables or {}),
             wait_ms=int(item.get("wait_ms", 3000)),
@@ -234,6 +298,7 @@ def parse_site_config(raw: dict, slug: str = "", variables: Optional[dict] = Non
             skip_if_context_contains=item.get("skip_if_context_contains") or [],
             deadline=deadline,
             company=company,
+            follow=follow,
         ))
 
     for key in ("email", "password"):

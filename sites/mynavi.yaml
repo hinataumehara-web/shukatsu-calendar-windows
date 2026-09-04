@@ -5,8 +5,6 @@
 # config.yaml の settings.grad_year から {grad_yy} に埋められる。
 # 卒業年が違う人に渡しても、この定義を書き換える必要はない。
 #
-# 状態: ログイン方法まで確認済み。一覧ページの締切パターンは未調整（enabled: false）
-#
 # なぜ login.mode が manual なのか
 # --------------------------------
 # マイナビのログインは My CareerID（mcid.mynavi.jp）に飛ぶ。新しいブラウザから
@@ -16,81 +14,96 @@
 #
 #     python main.py --login mynavi
 #
+# なぜ follow（2段階取得）が要るのか
+# -----------------------------------
+# マイナビの一覧ページには「締切間近」「締切間近コースあり」という
+# バッジしか出ておらず、**実際の締切日が書かれていない**。日付は各社の
+# コース情報ページ（/pc/search/corp<ID>/is.html）にある:
+#
+#     応募締切
+#     2026年9月10日 応募締切あと6日
+#
+# そこで一覧から「コース情報を見る」を辿り、その先で日付を読む。
+# 相手のサーバに負担をかけないよう、follow.max で件数に上限を設け、
+# follow.delay_ms で1件ごとに間隔を空けている。
+#
 # 使い始めるまでの手順
 # --------------------
 #   0. config.yaml の settings.grad_year に卒業予定年を入れる（例: 2028）
-#   1. python main.py --login mynavi         ブラウザが開くので手でログイン
-#   2. python tools/inspect_site.py mynavi --grep 締切
-#      → inspect_mynavi.txt に表示テキストが行番号つきで出る
-#   3. 締切を示す行の形と、企業名が何行前に出るかを見て、下の deadline /
-#      company を調整する
-#   4. python main.py --site mynavi --dry-run で確認できたら enabled: true
-#
-# 別のページを見たいときは URL を直接指定できる:
-#     python tools/inspect_site.py mynavi --url "https://job.mynavi.jp/28/pc/user/displayMypageMenu/index"
+#   1. python main.py --login mynavi      ブラウザが開くので手でログイン
+#   2. python main.py --site mynavi --dry-run   で検出結果を確認
+#   3. 問題なければ enabled: true にする
 # ============================================================================
 
 name: "マイナビ"
-enabled: false          # 一覧ページの調整が済んでから true にする
+enabled: false          # --dry-run で確認できたら true にする
 
 # manual 方式なのでメールアドレス・パスワードは使わない（.env への追記も不要）
 credentials: {}
 
 login:
   mode: manual
-  # ここを開くと My CareerID のログイン画面へ転送される（2026-09 時点で確認済み）
+  # ここを開くと My CareerID のログイン画面へ転送される。
+  # ログイン済みなら、マイページ領域のセッションを起こす助走にもなる
+  # （Cookie だけでは個別 URL がトップページに転送されてしまう）
   url: "https://job.mynavi.jp/{grad_yy}/pc/common/displayRelayScreen/displayForLogin"
   success_check:
-    # セッションが切れると、マイページを開いても ID 基盤に飛ばされる。
-    # 遷移先の URL にこの文字列が含まれていたらログアウト扱いにする
+    # セッションが切れると、マイページを開いても ID 基盤に飛ばされる
     url_not_contains: "mcid.mynavi.jp"
 
+# 各社のコース情報ページから締切を読むための共通設定
+# （応募済みリストと検討リストで同じものを使う）
+.follow_common: &follow_common
+  link_text: "コース情報を見る"
+  max: 30                 # 1回の実行で開く上限。増やすとアクセスも増える
+  delay_ms: 1500          # 1社ごとの間隔
+  wait_ms: 3000
+  title_prefix: "【マイナビ】"
+
+  deadline:
+    # 「2026年9月10日 応募締切あと6日」という行を直接拾う
+    match: regex
+    value: '\d{4}年\d{1,2}月\d{1,2}日[^\n]*応募締切'
+    date_from: same_line
+    context_before: 8
+    context_after: 1
+
+  # 募集が終わっているコースは登録しない
+  skip_if_context_contains: ["募集終了", "受付終了", "応募受付を終了", "応募を締め切りました"]
+
+  company:
+    # 会社名はページの一番上にある（締切の手前ではない）
+    pick: top
+    lookback: 12          # コース名は締切行の手前を遡って探す
+    min_length: 3
+    # この語の次の行は「値」なので、コース名の候補から外す
+    # （「募集人数 → 30名」の 30名 を拾わないため）
+    value_labels:
+      ["開催地域", "開催時期", "実施日数", "募集人数", "報酬", "交通費",
+       "応募締切", "実施場所", "選考", "対象", "定員", "待遇"]
+    skip_exact:
+      ["業種", "本社", "基本情報", "エントリー", "エントリー済", "検討リスト登録済",
+       "会社概要", "活動記録", "仕事体験", "説明会・セミナー", "前年の採用データ",
+       "開催地域", "開催時期", "実施日数", "応募締切", "募集人数", "報酬", "交通費",
+       "インターンシップ＆キャリアとは", "オープン・カンパニー＆", "キャリア教育等",
+       "インターンシップ", "＆キャリア", "お知らせ・イベント", "セミナー／説明会"]
+    skip_patterns:
+      - '^最終更新日'
+      - '^\d{4}卒$'
+      # 「8月下旬～9月中旬予定」のような開催時期の値
+      - '^\d{1,2}月[^\n]*(上旬|中旬|下旬|予定)'
+      # 「2～4日」のような実施日数の値
+      - '^\d+(～\d+)?日$'
+      # 「茨城 栃木 群馬 新潟 …」のような開催地域の羅列（空白区切りが5個以上）
+      - '^\S+( \S+){4,}$'
+
 listings:
-  # マイページの「スケジュール」。エントリー締切や説明会の予定が並ぶ想定
-  - url: "https://job.mynavi.jp/{grad_yy}/pc/user/displaySchedule/index"
+  # 応募済みの企業。エントリー済みなので締切を逃すと最も痛い
+  - url: "https://job.mynavi.jp/{grad_yy}/pc/user/displayAppliedEntryCorpList/index?selected=all"
     wait_ms: 4000
-    title_prefix: "【マイナビ】"
+    follow: *follow_common
 
-    deadline:
-      # まずはキーワード方式で広めに拾い、inspect_site.py の結果を見て
-      # match: regex に切り替えるとノイズが減る
-      # 例: value: '(エントリー)?締切[:：]?\s*\d{1,2}月\d{1,2}日'
-      match: keyword
-      keywords: ["締切", "締め切り", "〆切", "エントリー期限", "応募期限", "受付終了日"]
-      date_from: same_line
-      context_before: 3
-      context_after: 3
-
-    skip_if_context_contains: ["受付終了", "終了しました", "エントリー済"]
-
-    company:
-      lookback: 8
-      min_length: 4
-      skip_exact:
-        ["マイページ", "マイページトップ", "スケジュール", "企業検索", "メッセージ",
-         "エントリー", "お知らせ", "設定", "ログアウト", "検索", "もっと見る",
-         "詳細を見る", "前の月", "次の月", "今日"]
-      skip_patterns:
-        - '^\d{4}卒$'
-        - '^\d{1,2}月$'
-        - '^(月|火|水|木|金|土|日)$'
-        - '^(オンライン|対面|WEB)$'
-
-  # 予約リスト（説明会・セミナーの申込一覧）。不要なら丸ごと削ってよい
-  - url: "https://job.mynavi.jp/{grad_yy}/pc/search/bookmark_list/entry_reserve_all.html"
+  # 検討リストの企業。まだ応募していないが気になっている先
+  - url: "https://job.mynavi.jp/{grad_yy}/pc/user/displayBookmarkList/index"
     wait_ms: 4000
-    title_prefix: "【マイナビ】"
-    deadline:
-      match: keyword
-      keywords: ["締切", "締め切り", "〆切", "エントリー期限", "応募期限"]
-      date_from: same_line
-      context_before: 3
-      context_after: 3
-    skip_if_context_contains: ["受付終了", "終了しました"]
-    company:
-      lookback: 8
-      min_length: 4
-      skip_exact: ["予約リスト", "マイページ", "検索", "もっと見る", "詳細を見る"]
-      skip_patterns:
-        - '^\d{4}卒$'
-        - '^\d{1,2}月$'
+    follow: *follow_common

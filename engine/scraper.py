@@ -183,6 +183,11 @@ class GenericScraper:
             await self.page.wait_for_timeout(listing.wait_ms)
             await self._screenshot("listing")
 
+            if listing.follow:
+                entries = await self._follow_details(listing)
+                logger.info(f"{self.site.name}: {len(entries)} 件抽出")
+                return entries
+
             text = await self.page.inner_text("body")
             lines = [l.strip() for l in text.split("\n")]
             if listing.drop_empty_lines:
@@ -230,6 +235,136 @@ class GenericScraper:
 
         logger.info(f"{self.site.name}: {len(entries)} 件抽出")
         return entries
+
+    # ------------------------------------------------- 詳細ページを辿る取得
+    async def _collect_follow_urls(self, follow) -> list[str]:
+        """一覧ページから、辿るべきリンクの URL を集める"""
+        raw = await self.page.eval_on_selector_all(
+            "a[href]",
+            "els => els.map(e => [(e.innerText || '').trim(), e.href])",
+        )
+        urls, seen = [], set()
+        for label, href in raw:
+            if follow.link_text not in label or not href or href in seen:
+                continue
+            seen.add(href)
+            urls.append(href)
+        return urls
+
+    async def _follow_details(self, listing) -> list[DeadlineEntry]:
+        """一覧の各行から詳細ページへ入り、そちらで締切を読む
+
+        マイナビの一覧には「締切間近」としか出ておらず、実際の日付は
+        各社のコース情報ページにしかない。人間と同じように1社ずつ開く。
+
+        相手のサーバに負担をかけないよう、開く件数に上限を設け、
+        1件ごとに間隔を空ける。
+        """
+        follow = listing.follow
+        urls = await self._collect_follow_urls(follow)
+        if not urls:
+            logger.warning(
+                f"{self.site.name}: 「{follow.link_text}」のリンクが見つかりません。"
+                "一覧ページの URL か link_text の指定を確認してください"
+            )
+            return []
+
+        total = len(urls)
+        if total > follow.max_pages:
+            logger.info(
+                f"{self.site.name}: {total} 件中 {follow.max_pages} 件までを対象にします"
+                "（上限は sites/*.yaml の follow.max）"
+            )
+            urls = urls[:follow.max_pages]
+
+        logger.info(f"{self.site.name}: {len(urls)} 社の詳細ページを確認します")
+        entries: list[DeadlineEntry] = []
+        for i, url in enumerate(urls, 1):
+            if i > 1:
+                await self.page.wait_for_timeout(follow.delay_ms)
+            try:
+                entries.extend(await self._scrape_detail(url, follow))
+            except Exception as e:
+                logger.warning(f"{self.site.name}: {url} の取得でエラー: {e}")
+        return entries
+
+    async def _scrape_detail(self, url: str, follow) -> list[DeadlineEntry]:
+        """1社の詳細ページを開いて、締切のあるコースを拾う"""
+        await self.page.goto(url, wait_until="domcontentloaded")
+        await self.page.wait_for_timeout(follow.wait_ms)
+
+        text = await self.page.inner_text("body")
+        found = self.entries_from_detail(text, follow, url, self.site.name)
+        if not found:
+            logger.debug(f"{self.site.name}: {url} には締切が見つかりませんでした")
+        return found
+
+    @classmethod
+    def entries_from_detail(cls, text: str, follow, url: str,
+                            source: str) -> list[DeadlineEntry]:
+        """詳細ページのテキストから締切を取り出す（ブラウザ不要・テスト可能）"""
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        rule = follow.deadline
+        company = cls._pick_company(lines, follow.company)
+
+        found: list[DeadlineEntry] = []
+        seen: set[str] = set()
+        for i, line in enumerate(lines):
+            if not rule.matches(line):
+                continue
+
+            context = "\n".join(
+                lines[max(0, i - rule.context_before): i + rule.context_after + 1])
+            if any(w in context for w in follow.skip_if_context_contains):
+                continue
+
+            deadline = parse_date(cls._date_text(lines, i, rule, context))
+            if not deadline:
+                continue
+
+            title = cls._pick_title(lines, i, follow.company)
+            key = f"{title}|{deadline}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            found.append(DeadlineEntry(
+                company=company or "（企業名不明）",
+                event_title=f"{follow.title_prefix}{title or company}",
+                deadline=deadline,
+                url=url,
+                source=source,
+                description=f"{company} / {title or ''} / 締切 {deadline}",
+            ))
+        return found
+
+    @staticmethod
+    def _pick_company(lines: list[str], rule) -> str:
+        """ページ先頭から、最初のノイズでない行を会社名とする"""
+        for line in lines:
+            if not rule.is_noise(line):
+                return line
+        return ""
+
+    @staticmethod
+    def _pick_title(lines: list[str], idx: int, rule) -> str:
+        """締切行の手前を遡り、ノイズでない最後の行をコース名とする
+
+        詳細ページは「開催地域 / 茨城 栃木 …」「募集人数 / 30名」のように
+        ラベルと値が交互に並ぶ。ラベルは skip_exact で除けるが、値の形は
+        いくらでもあるので列挙しきれない。そこで value_labels に挙げた語の
+        次の行は、その値とみなして飛ばす。
+        """
+        candidates = []
+        start = max(0, idx - rule.lookback)
+        for j in range(start, idx):
+            line = lines[j]
+            if rule.is_noise(line):
+                continue
+            if j > 0 and rule.is_value_label(lines[j - 1]):
+                continue
+            candidates.append(line)
+        return candidates[-1] if candidates else ""
 
     @staticmethod
     def _date_text(lines: list[str], idx: int, rule, context: str) -> str:
