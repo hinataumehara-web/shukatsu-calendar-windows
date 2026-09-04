@@ -71,6 +71,21 @@ class GenericScraper:
             )
         logger.info(f"{self.site.name}: ログイン完了")
 
+    async def warmup(self):
+        """マイページを開く前に、ログイン URL を一度通す
+
+        マイナビのように SSO（My CareerID）を挟むサイトでは、Cookie を
+        持っているだけではマイページ領域のセッションが確立されず、
+        いきなり個別ページを開くとトップページに転送される。
+        人間と同じく「ログイン URL を開いて転送を通す」ところから始める。
+        """
+        if not self.site.login_url:
+            return
+        logger.info(f"{self.site.name}: セッションを起こしています...")
+        await self.page.goto(self.site.login_url, wait_until="domcontentloaded")
+        await self.page.wait_for_timeout(self.settings.get("warmup_wait_ms", 3000))
+        logger.debug(f"{self.site.name}: 助走後の URL = {self.page.url}")
+
     async def _verify_saved_session(self):
         """保存済みセッションでログイン状態が続いているかを確かめる
 
@@ -78,6 +93,8 @@ class GenericScraper:
         `python main.py --login <slug>` で保存したブラウザの状態を使う。
         セッションが切れていれば、ここで分かりやすく止める。
         """
+        await self.warmup()
+
         check_url = self.site.listings[0].url if self.site.listings else self.site.login_url
         logger.info(f"{self.site.name}: 保存済みセッションで確認中...")
         await self.page.goto(check_url, wait_until="domcontentloaded")

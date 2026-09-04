@@ -61,7 +61,8 @@ def _variables() -> dict:
 
 
 async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | None,
-                  headed: bool, url: str | None = None, links: bool = False):
+                  headed: bool, url: str | None = None, links: bool = False,
+                  out: str | None = None):
     from playwright.async_api import async_playwright
 
     from engine.scraper import GenericScraper
@@ -98,9 +99,13 @@ async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | Non
         page = await context.new_page()
         scraper = GenericScraper(site, page, {"debug_screenshots": False}, base_dir=BASE_DIR)
         try:
-            # 保存セッション方式のサイトは、Cookie を入れた時点でログイン済み
-            if not no_login and not site.uses_saved_session():
-                await scraper.login()
+            if not no_login:
+                if site.uses_saved_session():
+                    # Cookie を入れただけではマイページ領域に入れないことがある。
+                    # ログイン URL を一度通してセッションを起こす
+                    await scraper.warmup()
+                else:
+                    await scraper.login()
             await page.goto(target_url, wait_until="domcontentloaded")
             await page.wait_for_timeout(listing.wait_ms)
             text = await page.inner_text("body")
@@ -116,17 +121,25 @@ async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | Non
     if listing.drop_empty_lines:
         lines = [l for l in lines if l]
 
-    out_path = os.path.join(BASE_DIR, f"inspect_{slug}.txt")
+    out_path = os.path.join(BASE_DIR, f"inspect_{out or slug}.txt")
     # encoding を明示しないと Windows では cp932 で書かれ、
     # ページ中の絵文字などで UnicodeEncodeError になる
     with open(out_path, "w", encoding="utf-8") as f:
+        # どこを開いて、どこに着いたかを残す。転送されていると
+        # 「取れたつもりで別ページを見ていた」事故が起きるため
+        f.write(f"# 要求した URL: {target_url}\n")
+        f.write(f"# 実際に開いた URL: {final_url}\n")
+        f.write(f"# 取得行数: {len(lines)}\n")
+        if final_url != target_url:
+            f.write("# ※ 転送されています。このページは目的のものではない可能性があります\n")
+        f.write("\n")
         for i, line in enumerate(lines):
             f.write(f"{i:5d}  {line}\n")
 
     print(f"{len(lines)} 行を {out_path} に書き出しました")
 
     if links:
-        links_path = os.path.join(BASE_DIR, f"inspect_{slug}_links.txt")
+        links_path = os.path.join(BASE_DIR, f"inspect_{out or slug}_links.txt")
         with open(links_path, "w", encoding="utf-8") as f:
             for label, href in page_links:
                 f.write(f"{label}\t{href}\n")
@@ -150,6 +163,9 @@ def main():
     ap.add_argument("--headed", action="store_true", help="ブラウザを画面に表示する")
     ap.add_argument("--url", help="listings の代わりに、この URL を調べる"
                                   "（マイページの URL 探しに使う）")
+    ap.add_argument("--out", metavar="NAME",
+                    help="出力先を inspect_<NAME>.txt にする"
+                         "（複数ページを見比べるときに使う）")
     ap.add_argument("--links", action="store_true",
                     help="ページ内のリンク（表示名と URL）も書き出す。"
                          "締切が並んでいるページを探すときに使う")
@@ -166,7 +182,7 @@ def main():
                     os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
     return runtime.run(inspect(args.slug, args.listing, args.no_login, args.grep,
-                              args.headed, args.url, args.links))
+                              args.headed, args.url, args.links, args.out))
 
 
 if __name__ == "__main__":
