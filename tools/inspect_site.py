@@ -29,6 +29,26 @@ from engine import runtime, session  # noqa: E402
 from engine.site_config import build_variables, load_site_configs  # noqa: E402
 
 
+async def _collect_links(page) -> list:
+    """ページ内のリンクを (表示名, URL) で集める。重複は除く
+
+    締切が並んでいるページを探すのに使う。マイページの構成はサイトごとに
+    違うので、ログインした状態で実際のリンクを見るのが一番早い。
+    """
+    raw = await page.eval_on_selector_all(
+        "a[href]",
+        "els => els.map(e => [ (e.innerText || '').trim().replace(/\\s+/g, ' ').slice(0, 40),"
+        " e.href ])",
+    )
+    seen, out = set(), []
+    for label, href in raw:
+        if not href or href.startswith("javascript:") or (label, href) in seen:
+            continue
+        seen.add((label, href))
+        out.append((label, href))
+    return out
+
+
 def _variables() -> dict:
     """config.yaml から URL に埋める値（卒業年など）を読む。無くても動く"""
     import yaml
@@ -41,7 +61,7 @@ def _variables() -> dict:
 
 
 async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | None,
-                  headed: bool, url: str | None = None):
+                  headed: bool, url: str | None = None, links: bool = False):
     from playwright.async_api import async_playwright
 
     from engine.scraper import GenericScraper
@@ -84,6 +104,7 @@ async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | Non
             await page.goto(target_url, wait_until="domcontentloaded")
             await page.wait_for_timeout(listing.wait_ms)
             text = await page.inner_text("body")
+            page_links = await _collect_links(page) if links else []
             final_url = page.url
         finally:
             await browser.close()
@@ -103,6 +124,13 @@ async def inspect(slug: str, listing_index: int, no_login: bool, grep: str | Non
             f.write(f"{i:5d}  {line}\n")
 
     print(f"{len(lines)} 行を {out_path} に書き出しました")
+
+    if links:
+        links_path = os.path.join(BASE_DIR, f"inspect_{slug}_links.txt")
+        with open(links_path, "w", encoding="utf-8") as f:
+            for label, href in page_links:
+                f.write(f"{label}\t{href}\n")
+        print(f"{len(page_links)} 本のリンクを {links_path} に書き出しました")
     if grep:
         print(f"--- '{grep}' を含む行 ---")
         for i, line in enumerate(lines):
@@ -122,6 +150,9 @@ def main():
     ap.add_argument("--headed", action="store_true", help="ブラウザを画面に表示する")
     ap.add_argument("--url", help="listings の代わりに、この URL を調べる"
                                   "（マイページの URL 探しに使う）")
+    ap.add_argument("--links", action="store_true",
+                    help="ページ内のリンク（表示名と URL）も書き出す。"
+                         "締切が並んでいるページを探すときに使う")
     args = ap.parse_args()
 
     # .env を読む（メモ帳などが付ける BOM も許容する）
@@ -135,7 +166,7 @@ def main():
                     os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
     return runtime.run(inspect(args.slug, args.listing, args.no_login, args.grep,
-                              args.headed, args.url))
+                              args.headed, args.url, args.links))
 
 
 if __name__ == "__main__":

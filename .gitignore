@@ -4,6 +4,11 @@ config.yaml
 service_account.json
 credentials.json
 token.json
+
+# oauth_client.json は「Google でログイン」を配るために *あえてコミットする*。
+# デスクトップアプリの client_secret を Google 自身が機密として扱わない前提の
+# 運用だが、公開したくない場合はここのコメントを外し、友人には手渡しすること。
+# oauth_client.json
 .sessions/
 *.pem
 *-key.json

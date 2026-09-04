@@ -35,7 +35,7 @@ sys.path.insert(0, BASE_DIR)
 
 # calendar_client は google 系ライブラリを読み込むので、ここでは import しない。
 # --list-sites / --dry-run は Google の認証情報が無くても動くようにしたい。
-from engine import ics, runtime, session  # noqa: E402
+from engine import google_setup, ics, runtime, session  # noqa: E402
 from engine.site_config import (  # noqa: E402
     SiteConfigError,
     build_variables,
@@ -219,10 +219,42 @@ def write_ics(entries, path_arg: str, calendar_config: dict) -> int:
     return 0
 
 
+def connect_google(calendar_config: dict) -> int:
+    """ブラウザを開いて Google にログインし、許可を保存する"""
+    before = google_setup.status(BASE_DIR, calendar_config)
+    if before.method == "service_account":
+        output("  すでにサービスアカウントで接続する設定になっています。")
+        output("  Google アカウントでのログインに切り替えるなら、")
+        output("  service_account.json を別の場所に移してから実行してください。")
+        return 0
+
+    output("")
+    output("  ブラウザが開きます。カレンダーに登録したい Google アカウントを選び、")
+    output("  アクセスを許可してください。")
+    output("")
+
+    result = google_setup.connect(BASE_DIR, calendar_config)
+    output(f"  {result.title}")
+    if result.account:
+        output(f"  接続先: {result.account}")
+    if result.detail:
+        for line in result.detail.splitlines():
+            output(f"  {line}")
+
+    if result.ok:
+        logger.info(f"Google に接続しました（{result.account or '接続先不明'}）")
+        return 0
+    logger.error(f"Google への接続に失敗: {result.title}")
+    return 1
+
+
 async def main_async(args):
-    config = load_config(args.config, required=not args.ics)
+    config = load_config(args.config, required=not (args.ics or args.connect_google))
     settings = config.get("settings", {})
     calendar_config = config.get("google_calendar", {})
+
+    if args.connect_google:
+        return connect_google(calendar_config)
 
     variables = build_variables(config)
     sites = load_site_configs(os.path.join(BASE_DIR, "sites"), variables)
@@ -322,6 +354,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="カレンダーに書き込まず、検出した締切を表示するだけ")
     parser.add_argument("--list-sites", action="store_true", help="サイト定義の一覧を表示")
+    parser.add_argument("--connect-google", action="store_true",
+                        help="ブラウザを開いて Google にログインし、"
+                             "カレンダーへの登録を許可する（初回だけ）")
     parser.add_argument("--ics", nargs="?", const="shukatsu.ics", metavar="PATH",
                         help="Google API を使わず、締切を .ics ファイルに書き出す"
                              "（既定: shukatsu.ics）")

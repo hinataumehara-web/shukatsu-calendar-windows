@@ -1,38 +1,39 @@
 """Google Calendar クライアント
 
-認証方式は2つ。サービスアカウント方式を推奨する。
+つなぎ方は2つ。詳しい説明と状態判定は engine/google_setup.py にある。
 
-- サービスアカウント（推奨）: トークンが失効しないので放置しても止まらない。
-  OAuth 同意画面の設定も不要。カレンダーをサービスアカウントに共有するだけ。
-- OAuth2 ユーザー認証: 同意画面が「テスト」ステータスのままだと
-  リフレッシュトークンが7日で失効し、ある日突然 invalid_grant で止まる。
+- Google でログイン（OAuth）: 配る側が用意した OAuth クライアントを使うので、
+  受け取る側の作業は「ログイン1回」だけ。カレンダーは自分の primary。
+- サービスアカウント: 完全無人で回したい人向け。Google Cloud の設定が要る。
+
+このクラスはブラウザを開かない。ログインは google_setup.connect()
+（設定画面のボタン、または main.py --connect-google）でだけ行う。
+定期実行の最中にログイン画面が開いたら困るため。
 """
 import logging
 import os
-import pickle
 from datetime import datetime, timedelta, timezone
 
-from google.auth.exceptions import RefreshError
-from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from . import google_setup
 from .models import DeadlineEntry
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+SCOPES = google_setup.SERVICE_ACCOUNT_SCOPES
 DEFAULT_TAG = "[deadline]"
 
 
 class CalendarClient:
     def __init__(self, config: dict, base_dir: str = "."):
         self.base_dir = base_dir
+        self.config = config or {}
         self.calendar_id = config.get("calendar_id", "")
-        self.service_account_file = self._resolve(config.get("service_account_file", "service_account.json"))
-        self.credentials_file = self._resolve(config.get("credentials_file", "credentials.json"))
-        self.token_file = self._resolve(config.get("token_file", "token.json"))
+        paths = google_setup.paths(base_dir, config)
+        self.service_account_file = paths["service_account"]
+        self.token_file = paths["token"]
         self.event_tag = config.get("event_tag", DEFAULT_TAG)
         self.color_id = str(config.get("color_id", "11"))
         self.reminder_days = config.get("reminder_days", [3, 1])
@@ -45,12 +46,10 @@ class CalendarClient:
 
     # ---------------------------------------------------------------- 認証
     def authenticate(self):
+        """保存済みの認証情報でつなぐ。ブラウザは開かない"""
         if self.service_account_file and os.path.exists(self.service_account_file):
             self._authenticate_service_account()
         else:
-            logger.warning(
-                f"{self.service_account_file} が見つかりません。OAuth 方式にフォールバックします。"
-            )
             self._authenticate_oauth()
 
     def _authenticate_service_account(self):
@@ -79,34 +78,15 @@ class CalendarClient:
         logger.info(f"Google Calendar: サービスアカウントで認証完了 ({sa_email})")
 
     def _authenticate_oauth(self):
-        creds = None
-        if os.path.exists(self.token_file):
-            with open(self.token_file, "rb") as f:
-                creds = pickle.load(f)
+        creds = google_setup.load_credentials(self.base_dir, self.config)
 
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except RefreshError as e:
-                    raise RefreshError(
-                        f"{e}\n\n"
-                        "OAuth のリフレッシュトークンが失効しています。\n"
-                        "OAuth 同意画面が「テスト」ステータスのままだとトークンは7日で失効します。\n"
-                        "README の「サービスアカウント方式」への移行を検討してください。"
-                    ) from e
-            else:
-                if not os.path.exists(self.credentials_file):
-                    raise FileNotFoundError(
-                        f"{self.credentials_file} が見つかりません。README を参照してください。"
-                    )
-                flow = InstalledAppFlow.from_client_secrets_file(self.credentials_file, SCOPES)
-                creds = flow.run_local_server(port=0)
-            with open(self.token_file, "wb") as f:
-                pickle.dump(creds, f)
+        # OAuth では本人のカレンダーに書くので、指定が無ければ primary でよい
+        # （サービスアカウントと違い、primary は自分のメインカレンダーを指す）
+        if not self.calendar_id:
+            self.calendar_id = "primary"
 
         self.service = build("calendar", "v3", credentials=creds)
-        logger.info("Google Calendar: OAuth で認証完了")
+        logger.info("Google Calendar: Google アカウントで認証完了")
 
     # ------------------------------------------------------------ イベント
     def get_existing_keys(self, days_ahead: int = 180) -> set:

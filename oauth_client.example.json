@@ -1,0 +1,17 @@
+{
+  "_説明": [
+    "これは『Google でログイン』を使うための OAuth クライアントの雛形です。",
+    "配る人が1回だけ作り、oauth_client.json という名前で保存してリポジトリに含めます。",
+    "受け取った人は、このファイルには一切触りません（ログインボタンを押すだけ）。",
+    "作り方は README の「Google でログイン方式を用意する（配る人の作業）」を参照。"
+  ],
+  "installed": {
+    "client_id": "ここに発行された client_id を貼る.apps.googleusercontent.com",
+    "project_id": "ここにプロジェクト ID を貼る",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "ここに発行された client_secret を貼る",
+    "redirect_uris": ["http://localhost"]
+  }
+}

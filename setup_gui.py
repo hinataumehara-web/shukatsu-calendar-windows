@@ -38,7 +38,7 @@ except ImportError:
 
 import yaml  # noqa: E402
 
-from engine import configfile, runtime, setup_ops  # noqa: E402
+from engine import configfile, google_setup, runtime, setup_ops  # noqa: E402
 
 CONFIG = os.path.join(BASE_DIR, "config.yaml")
 CONFIG_EXAMPLE = os.path.join(BASE_DIR, "config.example.yaml")
@@ -94,68 +94,82 @@ class SetupWindow(tk.Tk):
         cal = self.config_data.get("google_calendar", {})
         settings = self.config_data.get("settings", {})
 
+        # ---- 接続方法 ----
+        conn = ttk.LabelFrame(frame, text="  カレンダーへの入れ方  ")
+        conn.pack(fill="x", **PAD)
+
         ttk.Label(
-            frame,
-            text="Google カレンダーに直接書き込む設定です。\n"
-                 "Google Cloud の設定をしたくない場合は、3番目のタブの\n"
-                 "「ICS ファイルを書き出す」を使えば、ここは空のままで構いません。",
+            conn,
+            text="おすすめは「Google でログイン」です。1回押すだけで、以後は自動で\n"
+                 "自分の Google カレンダーに登録され、スマホにも通知が届きます。",
             justify="left",
-        ).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
+        ).grid(row=0, column=0, columnspan=2, sticky="w", **PAD)
 
-        # 鍵ファイル
-        ttk.Label(frame, text="サービスアカウントの鍵").grid(row=1, column=0, sticky="w", **PAD)
-        self.key_label = ttk.Label(frame, text="", foreground="#555")
-        self.key_label.grid(row=1, column=1, sticky="w", **PAD)
-        ttk.Button(frame, text="鍵を選ぶ…", command=self._pick_key).grid(row=1, column=2, sticky="e", **PAD)
+        self.connection_label = ttk.Label(conn, text="", justify="left")
+        self.connection_label.grid(row=1, column=0, sticky="w", **PAD)
 
-        # サービスアカウントのアドレス（共有相手）
-        ttk.Label(frame, text="共有先アドレス").grid(row=2, column=0, sticky="w", **PAD)
-        self.sa_email = tk.StringVar(value="")
-        entry = ttk.Entry(frame, textvariable=self.sa_email, state="readonly")
-        entry.grid(row=2, column=1, sticky="ew", **PAD)
-        ttk.Button(frame, text="コピー", command=self._copy_sa_email).grid(row=2, column=2, sticky="e", **PAD)
+        self.login_button = ttk.Button(conn, text="Google でログイン",
+                                       command=self._connect_google)
+        self.login_button.grid(row=1, column=1, sticky="e", **PAD)
 
         ttk.Label(
-            frame,
-            text="↑ このアドレスを Google カレンダーの「設定と共有」→\n"
-                 "「特定のユーザーやグループと共有する」に貼り、\n"
-                 "「予定の変更権限」を与えてください。",
+            conn,
+            text="Google を使いたくない場合は、3番目のタブの「ICS ファイルを書き出す」を\n"
+                 "使ってください。こちらは設定が一切要りません。",
             justify="left", foreground="#555",
-        ).grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
+        ).grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
+        conn.columnconfigure(0, weight=1)
 
-        # カレンダー ID
-        ttk.Label(frame, text="カレンダー ID").grid(row=4, column=0, sticky="w", **PAD)
-        self.calendar_id = tk.StringVar(value=cal.get("calendar_id", ""))
-        ttk.Entry(frame, textvariable=self.calendar_id).grid(row=4, column=1, sticky="ew", **PAD)
-        ttk.Button(frame, text="接続テスト", command=self._test_google).grid(row=4, column=2, sticky="e", **PAD)
+        # ---- 動作の設定 ----
+        opts = ttk.LabelFrame(frame, text="  動作の設定  ")
+        opts.pack(fill="x", **PAD)
 
-        # 通知・期間
-        opts = ttk.Frame(frame)
-        opts.grid(row=5, column=0, columnspan=3, sticky="w", **PAD)
-
-        # 卒業予定年（マイナビのように URL に年度が入るサイトで使う）
-        ttk.Label(opts, text="卒業予定年").grid(row=0, column=0, sticky="w")
+        ttk.Label(opts, text="卒業予定年").grid(row=0, column=0, sticky="w", **PAD)
         self.grad_year = tk.StringVar(value=str(setup_ops.grad_year(BASE_DIR)))
         ttk.Spinbox(opts, from_=2020, to=2040, width=8,
-                    textvariable=self.grad_year).grid(row=0, column=1, padx=8)
-        ttk.Label(opts, text="（マイナビの URL に使われます。3年生・院1年なら今の年度+2）",
-                  foreground="#555").grid(row=0, column=2, columnspan=2, sticky="w")
+                    textvariable=self.grad_year).grid(row=0, column=1, sticky="w", pady=6)
+        ttk.Label(opts, text="マイナビのページはこの年で決まります（3年生・院1年なら今の年度+2）",
+                  foreground="#555").grid(row=0, column=2, columnspan=2, sticky="w", **PAD)
 
-        ttk.Label(opts, text="通知するタイミング（日前・カンマ区切り）").grid(row=1, column=0, sticky="w")
+        ttk.Label(opts, text="通知（何日前・カンマ区切り）").grid(row=1, column=0, sticky="w", **PAD)
         self.reminder_days = tk.StringVar(
             value=", ".join(str(d) for d in cal.get("reminder_days", [3, 1])))
-        ttk.Entry(opts, textvariable=self.reminder_days, width=12).grid(row=1, column=1, padx=8)
-        ttk.Label(opts, text="何日先まで拾うか").grid(row=1, column=2, sticky="w", padx=(20, 0))
+        ttk.Entry(opts, textvariable=self.reminder_days, width=12).grid(row=1, column=1, sticky="w", pady=6)
+
+        ttk.Label(opts, text="何日先まで拾うか").grid(row=1, column=2, sticky="e", **PAD)
         self.days_ahead = tk.StringVar(value=str(settings.get("days_ahead", 90)))
-        ttk.Entry(opts, textvariable=self.days_ahead, width=8).grid(row=1, column=3, padx=8)
+        ttk.Entry(opts, textvariable=self.days_ahead, width=8).grid(row=1, column=3, sticky="w", pady=6)
 
-        # 診断結果
-        self.google_status = tk.Text(frame, height=8, wrap="word", relief="solid", borderwidth=1)
-        self.google_status.grid(row=6, column=0, columnspan=3, sticky="nsew", **PAD)
+        ttk.Label(opts, text="カレンダー ID").grid(row=2, column=0, sticky="w", **PAD)
+        self.calendar_id = tk.StringVar(value=cal.get("calendar_id", ""))
+        ttk.Entry(opts, textvariable=self.calendar_id).grid(row=2, column=1, columnspan=2, sticky="ew", pady=6)
+        ttk.Label(opts, text="空でよい（自分のカレンダー）",
+                  foreground="#555").grid(row=2, column=3, sticky="w", **PAD)
+        opts.columnconfigure(2, weight=1)
+
+        # ---- 上級者向け ----
+        adv = ttk.LabelFrame(frame, text="  上級者向け: サービスアカウント  ")
+        adv.pack(fill="x", **PAD)
+
+        ttk.Label(adv, text="鍵ファイル").grid(row=0, column=0, sticky="w", **PAD)
+        self.key_label = ttk.Label(adv, text="", foreground="#555")
+        self.key_label.grid(row=0, column=1, sticky="w", **PAD)
+        ttk.Button(adv, text="鍵を選ぶ…", command=self._pick_key).grid(row=0, column=2, sticky="e", **PAD)
+
+        ttk.Label(adv, text="共有先アドレス").grid(row=1, column=0, sticky="w", **PAD)
+        self.sa_email = tk.StringVar(value="")
+        ttk.Entry(adv, textvariable=self.sa_email, state="readonly").grid(
+            row=1, column=1, sticky="ew", **PAD)
+        ttk.Button(adv, text="コピー", command=self._copy_sa_email).grid(row=1, column=2, sticky="e", **PAD)
+        adv.columnconfigure(1, weight=1)
+
+        ttk.Button(adv, text="接続テスト", command=self._test_google).grid(
+            row=2, column=2, sticky="e", **PAD)
+
+        # ---- 診断結果 ----
+        self.google_status = tk.Text(frame, height=7, wrap="word", relief="solid", borderwidth=1)
+        self.google_status.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.google_status.configure(state="disabled")
-
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(6, weight=1)
         return frame
 
     # --- タブ2: サイト -----------------------------------------------------
@@ -278,6 +292,37 @@ class SetupWindow(tk.Tk):
         self.clipboard_append(value)
         self._set_status("共有先アドレスをコピーしました")
 
+    def _refresh_connection(self):
+        """今どうつながっているかを画面に反映する（ネットワークは使わない）"""
+        state = google_setup.status(BASE_DIR, self.config_data.get("google_calendar", {}))
+        mark = "接続済み" if state.connected else "未接続"
+        self.connection_label.configure(text=f"状態: {mark} — {state.title}")
+        self.login_button.configure(
+            text="別のアカウントでログイン" if state.method == "oauth" else "Google でログイン",
+            state="disabled" if state.method == "service_account" else "normal",
+        )
+
+    def _connect_google(self):
+        """ブラウザを開いてログインしてもらう（終わるまで待つのでスレッドで）"""
+        self._save()
+        self._show_google(setup_ops.Check(True, "ブラウザで許可してください…",
+                                          "開いたページで Google アカウントを選び、\n"
+                                          "カレンダーへのアクセスを許可してください。"))
+        self.login_button.configure(state="disabled")
+
+        def work():
+            return google_setup.connect(BASE_DIR, self.config_data.get("google_calendar", {}))
+
+        def done(state):
+            self.login_button.configure(state="normal")
+            detail = state.detail
+            if state.account:
+                detail = f"接続先: {state.account}\n{detail}"
+            self._show_google(setup_ops.Check(state.ok, state.title, detail))
+            self._refresh_connection()
+
+        self._in_background(work, done)
+
     def _refresh_google_status(self, quick: bool = False):
         """quick=True ならネットワークを使わない範囲だけ確認する"""
         check = setup_ops.read_service_account(KEY_FILE)
@@ -285,7 +330,8 @@ class SetupWindow(tk.Tk):
             text=os.path.basename(KEY_FILE) if check.ok else "未設定")
         if check.sa_email:
             self.sa_email.set(check.sa_email)
-        if quick:
+        self._refresh_connection()
+        if quick and check.sa_email:
             self._show_google(check)
 
     def _test_google(self):

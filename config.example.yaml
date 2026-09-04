@@ -9,17 +9,19 @@
 
 google_calendar:
   # 予定を書き込むカレンダーの ID。
-  # 自分のメインカレンダーなら自分のメールアドレス、
-  # 専用カレンダーを作った場合は「設定と共有」に表示されるカレンダー ID。
-  # ※サービスアカウント方式では "primary" は使えない
-  calendar_id: "you@example.com"
+  #
+  # 「Google でログイン」方式なら空のままでよい（自分のメインカレンダーに入る）。
+  # 別のカレンダーに入れたい場合だけ、「設定と共有」に出ているカレンダー ID を書く。
+  # ※サービスアカウント方式では空や "primary" は使えない（自分の ID を必ず書く）
+  calendar_id: ""
 
-  # サービスアカウントの鍵（推奨・トークンが失効しない）
-  service_account_file: "service_account.json"
-
-  # 以下は OAuth 方式を使う場合のみ（service_account.json が無いときに使われる）
-  credentials_file: "credentials.json"
+  # 「Google でログイン」用。配布物に同梱されている（触らなくてよい）
+  oauth_client_file: "oauth_client.json"
+  # ログインの結果が保存される場所（自動で作られる）
   token_file: "token.json"
+
+  # サービスアカウント方式を使う場合だけ置く（上級者向け）
+  service_account_file: "service_account.json"
 
   # 予定のタイトル先頭に付く目印。重複検出にも使うので途中で変えない
   event_tag: "[就活自動登録]"
